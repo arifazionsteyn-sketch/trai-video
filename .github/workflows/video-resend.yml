@@ -1,0 +1,31 @@
+# Переслать в Telegram ролики прошлого запуска (из архива Artifacts). Номер запуска — в video/resend.json.
+name: video-resend
+on:
+  push:
+    branches: [main]
+    paths: ['video/resend.json']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: r
+        run: echo "id=$(python3 -c "import json;print(json.load(open('video/resend.json'))['run'])")" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: trai-video-${{ steps.r.outputs.id }}
+          path: vids
+          run-id: ${{ steps.r.outputs.id }}
+          github-token: ${{ github.token }}
+      - name: В Telegram файлом
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_REVIEW_CHAT: ${{ secrets.TG_REVIEW_CHAT }}
+        run: |
+          for f in vids/*.mp4; do
+            curl -sS -X POST "https://api.telegram.org/bot$TG_BOT_TOKEN/sendDocument" -F chat_id="$TG_REVIEW_CHAT" \
+              -F caption="Первый пробный ролик · $(basename "$f")" -F document=@"$f;type=video/mp4" | head -c 200; echo
+          done

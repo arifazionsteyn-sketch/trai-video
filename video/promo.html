@@ -1,0 +1,179 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family: ID; src: url(fonts/InterDisplay-Black.otf); font-weight: 900; }
+@font-face { font-family: ID; src: url(fonts/InterDisplay-Bold.otf); font-weight: 700; }
+@font-face { font-family: IN; src: url(fonts/Inter-SemiBold.otf); font-weight: 600; }
+@font-face { font-family: IN; src: url(fonts/Inter-Medium.otf); font-weight: 500; }
+html, body { margin: 0; overflow: hidden; background: #050607; }
+#gl { position: absolute; inset: 0; }
+.ov { position: absolute; left: 0; right: 0; text-align: center; color: #F5F5F2; }
+#top { top: 230px; }
+#kick { font: 600 30px IN; letter-spacing: 7px; color: #C9A65F; text-transform: uppercase; }
+#title { font: 900 112px/1.02 ID; margin-top: 26px; letter-spacing: -2px; }
+#sub { font: 500 40px/1.3 IN; color: #A9AEB6; margin-top: 22px; }
+#chip { display: inline-block; margin-top: 34px; padding: 18px 40px; border-radius: 999px; background: #C9A65F; color: #0B0C0F; font: 700 40px ID; }
+#bot { bottom: 150px; font: 500 30px IN; color: #8A8F98; }
+#bot b { color: #D9C08A; font-weight: 600; }
+#bar { position: absolute; left: 140px; right: 140px; bottom: 236px; height: 6px; display: flex; gap: 8px; }
+#bar i { flex: 1; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; position: relative; }
+#bar i b { position: absolute; inset: 0; width: 0; background: #C9A65F; }
+body.hero .ov, body.hero #bar { display: none; }
+</style></head>
+<body>
+<canvas id="gl"></canvas>
+<div class="ov" id="top"><div id="kick"></div><div id="title"></div><div id="sub"></div><div id="chipw"></div></div>
+<div id="bar"></div>
+<div class="ov" id="bot"></div>
+<script type="module">
+// Промо «ноутбук»: тонкий алюминиевый ноутбук (без логотипов) открывается, на экране — знак TRAI, затем живые разделы сайта.
+// JOB: { mode: 'reel' (вертикально, с подписями) | 'hero' (горизонтально, без слов, в конце крышка закрывается — бесшовный повтор),
+//        w, h (CSS-пиксели), scale (плотность), total, sections[], bottom }
+import * as THREE from 'https://esm.sh/three@0.170.0';
+import { RoundedBoxGeometry } from 'https://esm.sh/three@0.170.0/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'https://esm.sh/three@0.170.0/examples/jsm/environments/RoomEnvironment.js';
+const J = window.JOB, SEC = J.sections, HERO = J.mode === 'hero', W = J.w, H = J.h;
+document.body.classList.toggle('hero', HERO); document.body.style.width = W + 'px'; document.body.style.height = H + 'px';
+const cl = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x)), eo = x => 1 - (1 - cl(x)) ** 3, eio = x => { x = cl(x); return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2; };
+const ss = x => { x = cl(x); return x * x * x * (x * (x * 6 - 15) + 10); }; // очень мягкий разгон и торможение
+
+const cv = document.getElementById('gl'); cv.style.width = W + 'px'; cv.style.height = H + 'px';
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(J.scale || 1); renderer.setSize(W, H, false); renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+const scene = new THREE.Scene();
+const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.03).texture; scene.environmentIntensity = 0.7;
+// Фон: глубокий чёрный с тёплым золотым ореолом
+const bgC = document.createElement('canvas'); bgC.width = 512; bgC.height = Math.round(512 * H / W); { const x = bgC.getContext('2d'), w = bgC.width, h = bgC.height; x.fillStyle = '#050607'; x.fillRect(0, 0, w, h);
+  const cy = HERO ? h * 0.55 : h * 0.56, g = x.createRadialGradient(w / 2, cy, 4, w / 2, cy, Math.max(w, h) * (HERO ? 0.42 : 0.4)); g.addColorStop(0, 'rgba(201,166,95,.20)'); g.addColorStop(0.45, 'rgba(201,166,95,.06)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }
+const bgT = new THREE.CanvasTexture(bgC); bgT.colorSpace = THREE.SRGBColorSpace; scene.background = bgT;
+const camera = new THREE.PerspectiveCamera(HERO ? 24 : 30, W / H, 0.05, 100);
+const key = new THREE.DirectionalLight(0xfff4e6, 1.5); key.position.set(-3, 6, 5); scene.add(key);
+const rim = new THREE.DirectionalLight(0xD9B46A, 0.9); rim.position.set(3.5, 2.5, -5); scene.add(rim);
+const fill = new THREE.DirectionalLight(0xbfd0ff, 0.25); fill.position.set(5, 1, 4); scene.add(fill);
+
+// ---------- Ноутбук ----------
+const Wd = 3.04, Dp = 2.12, Hb = 0.062, Hl = 0.034, R0 = 0.034;
+const alu = new THREE.MeshPhysicalMaterial({ color: 0x34373c, metalness: 1, roughness: 0.36, clearcoat: 0.25, clearcoatRoughness: 0.5 });
+const aluEdge = new THREE.MeshPhysicalMaterial({ color: 0x5a5e66, metalness: 1, roughness: 0.22 });
+const black = new THREE.MeshStandardMaterial({ color: 0x060607, roughness: 0.55, metalness: 0.2 });
+const laptop = new THREE.Group(); scene.add(laptop);
+const base = new THREE.Mesh(new RoundedBoxGeometry(Wd, Hb, Dp, 10, R0), alu); base.position.y = Hb / 2; laptop.add(base);
+// выемка спереди под палец
+const notch = new THREE.Mesh(new RoundedBoxGeometry(0.42, 0.024, 0.06, 4, 0.012), black); notch.position.set(0, Hb - 0.008, Dp / 2 - 0.018); laptop.add(notch);
+// клавиатура: углублённая чёрная подложка, клавиши с зазорами (верхний ряд ниже), широкий пробел
+const kbW = Wd * 0.8, kbD = 0.92, kbZ = -Dp * 0.15;
+const well = new THREE.Mesh(new RoundedBoxGeometry(kbW + 0.04, 0.004, kbD + 0.04, 3, 0.002), black); well.position.set(0, Hb - 0.0005, kbZ); laptop.add(well);
+const keyMat = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.82, metalness: 0.05 });
+const keyGeo = new RoundedBoxGeometry(1, 0.016, 1, 3, 0.006); const kb = [];
+const rows = [[14, 0.5], [14, 1], [14, 1], [13, 1], [12, 1], [0, 1]];
+const kU = kbW / 14.6, gap = kU * 0.14, rowD = kbD / 5.65;
+let zc = kbZ - kbD / 2;
+rows.forEach(([n, hgt], ri) => {
+  const d = rowD * hgt - gap; zc += rowD * hgt / 2;
+  let widths;
+  if (ri === 5) widths = [1, 1, 1, 1.25, 5.4, 1.25, 1, 1, 1.1].map(x => x * 1);
+  else if (ri === 3) widths = [1.75, ...Array(11).fill(1), 1.85];
+  else if (ri === 4) widths = [2.3, ...Array(10).fill(1), 2.3];
+  else if (ri === 2) widths = [1.5, ...Array(12).fill(1), 1.1];
+  else if (ri === 1) widths = [...Array(13).fill(1), 1.6];
+  else widths = Array(14).fill(1.04);
+  const tot = widths.reduce((a, b) => a + b, 0); const sc = 14.6 / tot; let xc = -kbW / 2;
+  for (const w0 of widths) { const w = w0 * sc * kU; kb.push([xc + w / 2, zc, w - gap, d]); xc += w; }
+  zc += rowD * hgt / 2;
+});
+const keys = new THREE.InstancedMesh(keyGeo, keyMat, kb.length); { const m = new THREE.Matrix4(); kb.forEach(([x, z, w, d], i) => { m.compose(new THREE.Vector3(x, Hb + 0.004, z), new THREE.Quaternion(), new THREE.Vector3(w, 1, d)); keys.setMatrixAt(i, m); }); }
+laptop.add(keys);
+// решётки динамиков по бокам клавиатуры
+{ const pts = []; for (const sx of [-1, 1]) for (let i = 0; i < 26; i++) for (let j = 0; j < 6; j++) pts.push(sx * (kbW / 2 + 0.1 + j * 0.018), Hb + 0.0012, kbZ - kbD / 2 + i * (kbD / 25));
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); laptop.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x0a0a0b, size: 0.007 }))); }
+// тачпад: большой, чуть светлее и глаже
+const pad = new THREE.Mesh(new RoundedBoxGeometry(1.32, 0.003, 0.82, 4, 0.0015), new THREE.MeshPhysicalMaterial({ color: 0x3b3f45, metalness: 0.9, roughness: 0.18 })); pad.position.set(0, Hb + 0.0005, Dp * 0.28); laptop.add(pad);
+// шарнир
+const hingeBar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, Wd * 0.82, 24), black); hingeBar.rotation.z = Math.PI / 2; hingeBar.position.set(0, Hb + 0.006, -Dp / 2 + 0.04); laptop.add(hingeBar);
+const hinge = new THREE.Group(); hinge.position.set(0, Hb + 0.006, -Dp / 2 + 0.04); laptop.add(hinge);
+const LD = Dp - 0.06;
+const lid = new THREE.Mesh(new RoundedBoxGeometry(Wd, Hl, LD, 10, 0.016), alu); lid.position.set(0, Hl / 2, LD / 2); hinge.add(lid);
+// стекло дисплея с тонкой рамкой и «чёлкой» камеры
+const glassMat = new THREE.MeshStandardMaterial({ color: 0x030304, roughness: 0.12, metalness: 0.3 });
+const glass = new THREE.Mesh(new RoundedBoxGeometry(Wd - 0.02, 0.002, LD - 0.02, 6, 0.001), glassMat); glass.position.set(0, -0.001, LD / 2); hinge.add(glass);
+const SW = Wd - 0.13, SH = SW / 1.6;
+const scr = document.createElement('canvas'); scr.width = J.screenW || 2160; scr.height = Math.round(scr.width / 1.6); const sx = scr.getContext('2d'), SX = scr.width / 1440;
+const scrT = new THREE.CanvasTexture(scr); scrT.colorSpace = THREE.SRGBColorSpace; scrT.anisotropy = 1; scrT.generateMipmaps = false; scrT.minFilter = THREE.LinearFilter; // без мипмапов: на программной видеокарте они пересчитывались каждый кадр
+const screen = new THREE.Mesh(new THREE.PlaneGeometry(SW, SH), new THREE.MeshBasicMaterial({ map: scrT, toneMapped: false }));
+screen.rotation.x = Math.PI / 2; screen.position.set(0, -0.0035, LD / 2 + (LD - SH) / 2 - 0.05); hinge.add(screen);
+// блик на стекле
+const shine = new THREE.Mesh(new THREE.PlaneGeometry(SW, SH), new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0, roughness: 0.04, transparent: true, opacity: 0.18, clearcoat: 1, clearcoatRoughness: 0.02 }));
+shine.rotation.x = Math.PI / 2; shine.position.copy(screen.position); shine.position.y -= 0.0008; hinge.add(shine);
+// мягкая тень
+const shC = document.createElement('canvas'); shC.width = shC.height = 256; { const x = shC.getContext('2d'); const g = x.createRadialGradient(128, 128, 8, 128, 128, 128); g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(0.6, 'rgba(0,0,0,.35)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, 256, 256); }
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(Wd * 1.6, Dp * 1.7), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shC), transparent: true, depthWrite: false }));
+shadow.rotation.x = -Math.PI / 2; shadow.position.y = -0.003; laptop.add(shadow);
+
+// ---------- Экран ----------
+const cache = new Map();
+const img = src => { if (cache.has(src)) return cache.get(src); const p = new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); cache.set(src, p); if (cache.size > 60) cache.delete(cache.keys().next().value); return p; };
+const frameAt = (s, t) => { const x = t - s.start, f = s.frames; let i = 0; while (i + 1 < f.length && f[i + 1].t <= x) i++; const j = Math.min(f.length - 1, i + 1); const w = j === i ? 0 : cl((x - f[i].t) / ((f[j].t - f[i].t) || 1)); return [f[i].src, f[j].src, w]; };
+const FX = 'brightness(1.16) saturate(1.5) contrast(1.08)'; // ярче и сочнее — чтобы бросалось в глаза
+const drawSec = async (s, t, alpha = 1) => { const [a, b, w] = frameAt(s, t); sx.filter = FX; sx.globalAlpha = alpha; sx.drawImage(await img(a), 0, 0, scr.width, scr.height); if (w > 0.02) { sx.globalAlpha = alpha * w; sx.drawImage(await img(b), 0, 0, scr.width, scr.height); } sx.globalAlpha = 1; sx.filter = 'none'; };
+// фирменный знак TRAI (три узла, связанных линиями) со свечением
+function mark(k) {
+  const cx = scr.width / 2, cy = scr.height / 2, s = scr.height * 0.0011 * (0.86 + 0.14 * eo(k));
+  sx.save(); sx.globalAlpha = cl(k * 1.4); sx.translate(cx, cy); sx.scale(s, s); sx.translate(-256, -265);
+  const glow = sx.createRadialGradient(256, 265, 10, 256, 265, 330); glow.addColorStop(0, `rgba(201,166,95,${0.28 * eo(k)})`); glow.addColorStop(1, 'rgba(201,166,95,0)'); sx.fillStyle = glow; sx.fillRect(-200, -200, 912, 930);
+  sx.shadowColor = 'rgba(226,194,124,.75)'; sx.shadowBlur = 40;
+  sx.strokeStyle = '#C9A35A'; sx.lineWidth = 30; sx.lineCap = 'round'; const draw = eo(k * 1.6);
+  const seg = (a, b, c, d) => { sx.beginPath(); sx.moveTo(a, b); sx.lineTo(a + (c - a) * draw, b + (d - b) * draw); sx.stroke(); };
+  seg(140, 168, 372, 168); seg(256, 168, 256, 362); seg(140, 168, 256, 266); seg(372, 168, 256, 266);
+  sx.fillStyle = '#E2C27C'; [[140, 168, 44, 0], [372, 168, 44, 0.12], [256, 362, 52, 0.24]].forEach(([x, y, r, d]) => { const q = eo((k - d) * 2.2); if (q > 0) { sx.beginPath(); sx.arc(x, y, r * q, 0, 7); sx.fill(); } });
+  sx.restore();
+}
+const bar = document.getElementById('bar'); const segs = SEC.filter(s => s.frames?.length && s.key !== 'outro'); bar.innerHTML = segs.map(() => '<i><b></b></i>').join('');
+document.getElementById('bot').innerHTML = J.bottom || '';
+const intro = SEC[0];
+
+window.render = async t => {
+  const T = J.total;
+  // крышка: открывается с лёгким «доводом»; в режиме hero в конце закрывается (повтор без шва)
+  const o = cl(t / 1.7), openK = o < 1 ? 1 - Math.pow(1 - o, 3) + Math.sin(o * Math.PI) * 0.035 : 1;
+  const close = HERO ? ss((t - (T - 1.4)) / 1.4) : 0;
+  const ang = 112 * openK * (1 - close); hinge.rotation.x = -ang * Math.PI / 180;
+  // камера: от общего плана — наезд на экран — в конце обратно
+  const zin = ss((t - 1.4) / 1.6), zout = ss((t - (T - (HERO ? 2.4 : 1.4))) / (HERO ? 1.2 : 1.1)), z = zin * (1 - zout);
+  const drift = 0.05 * Math.sin(t * 0.42);
+  if (HERO) {
+    const a = -0.42 + 0.3 * z + drift, r = 7.6 - 2.25 * z;
+    camera.position.set(Math.sin(a) * r, 3.1 - 1.75 * z, Math.cos(a) * r); camera.lookAt(0, 0.45 + 0.5 * z, -0.15 - 0.8 * z);
+  } else {
+    const a = -0.5 + 0.32 * z + drift, r = 13.4 - 3.6 * z - 0.4 * eo(t / 1.6);
+    camera.position.set(Math.sin(a) * r, 4.3 - 2.6 * z, Math.cos(a) * r); camera.lookAt(0, 0.55 + 0.45 * z, -0.2 - 0.78 * z);
+  }
+  // экран
+  const cur = SEC.find(s => t >= s.start && t < s.end) || SEC.at(-1), idx = SEC.indexOf(cur), prev = SEC[idx - 1];
+  sx.fillStyle = '#050607'; sx.fillRect(0, 0, scr.width, scr.height);
+  if (cur === intro) mark((t - 0.7) / 1.3);
+  else if (cur.frames?.length) {
+    const fade = ss((t - cur.start) / 0.35);
+    if (fade < 1) { if (prev === intro) mark(1); else if (prev?.frames?.length) await drawSec(prev, prev.end - 0.001); }
+    await drawSec(cur, t, fade);
+  }
+  // скруглённые верхние углы и «чёлка» камеры — как у тонких ноутбуков
+  { const w = scr.width, h = scr.height, r = w * 0.012; sx.fillStyle = '#000'; sx.beginPath(); sx.moveTo(0, 0); sx.lineTo(r, 0); sx.quadraticCurveTo(0, 0, 0, r); sx.fill(); sx.beginPath(); sx.moveTo(w, 0); sx.lineTo(w - r, 0); sx.quadraticCurveTo(w, 0, w, r); sx.fill();
+    const nw = w * 0.085, nh = h * 0.028; sx.beginPath(); sx.roundRect(w / 2 - nw / 2, -nh, nw, nh * 2, nh * 0.6); sx.fill(); }
+  const lit = cl((ang - 25) / 55); if (lit < 1) { sx.fillStyle = `rgba(0,0,0,${1 - lit})`; sx.fillRect(0, 0, scr.width, scr.height); }
+  scrT.needsUpdate = true;
+  // подписи
+  if (!HERO) {
+    const k = ss((t - cur.start) / 0.4), out = cl((cur.end - t) / 0.25), last = cur === SEC.at(-1);
+    const top = document.getElementById('top'); top.style.opacity = Math.min(k, last ? 1 : out); top.style.transform = `translateY(${(1 - k) * 28}px)`;
+    document.getElementById('kick').textContent = cur.kick || ''; document.getElementById('title').innerHTML = cur.title || ''; document.getElementById('sub').textContent = cur.sub || '';
+    document.getElementById('chipw').innerHTML = cur.chip ? `<span id="chip">${cur.chip}</span>` : '';
+    segs.forEach((s, i) => { bar.children[i].firstChild.style.width = (cl((t - s.start) / (s.end - s.start)) * 100) + '%'; });
+    bar.style.opacity = cur.key === 'outro' ? 1 - cl((t - cur.start) / 0.3) : 1;
+  }
+  renderer.render(scene, camera);
+};
+await document.fonts.ready; await Promise.all(SEC.flatMap(s => (s.frames || []).slice(0, 1)).map(f => img(f.src)));
+window.ready = true;
+</script>
+</body></html>

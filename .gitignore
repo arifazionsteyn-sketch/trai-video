@@ -1,0 +1,5 @@
+video/out/
+video/node_modules/
+video/package*.json
+__pycache__/
+promo_out/

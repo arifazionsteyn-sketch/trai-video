@@ -1,0 +1,88 @@
+# TRAI — ролики про золото: сценарий (Gemini + поиск Google) → озвучка Azure → кадры → эффекты → Telegram (файлом, без сжатия).
+# Запуск сейчас: изменить video/run.json в ветке dev (count — сколько тем, langs — языки) и сохранить (commit).
+# После переноса в main заработает и расписание (каждый день) и кнопка «Run workflow».
+name: video
+on:
+  push:
+    branches: [main]
+    paths: ['video/run.json']
+  workflow_dispatch:
+    inputs:
+      count: { description: 'Сколько тем', default: '1' }
+      langs: { description: 'Языки', default: 'ru,en,uz' }
+  schedule:
+    - cron: '0 3 * * *'   # 08:00 Ташкент (GitHub иногда запускает с опозданием на 5–20 минут)
+concurrency: { group: video, cancel-in-progress: false }
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Инструменты
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg libasound2t64 >/dev/null || sudo apt-get install -y -qq ffmpeg >/dev/null
+          pip install -q azure-cognitiveservices-speech numpy faster-whisper
+          cd video && npm init -y >/dev/null && npm i -s playwright@1
+      - name: Модель распознавания речи (кэш)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: whisper-small-v1
+      - name: История тем
+        uses: actions/cache/restore@v4
+        with:
+          path: video/history.json
+          key: video-history-${{ github.run_id }}
+          restore-keys: video-history-
+      - name: Ролики
+        env:
+          GEMINI_SCRIPT_KEY: ${{ secrets.GEMINI_SCRIPT_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_REVIEW_CHAT: ${{ secrets.TG_REVIEW_CHAT }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_VOICE: ${{ vars.GEMINI_VOICE }}
+          GEMINI_VOICE_RU: ${{ vars.GEMINI_VOICE_RU }}
+          GEMINI_VOICE_EN: ${{ vars.GEMINI_VOICE_EN }}
+          GEMINI_VOICE_UZ: ${{ vars.GEMINI_VOICE_UZ }}
+          ELEVEN_VOICE_RU: ${{ vars.ELEVEN_VOICE_RU }}
+          ELEVEN_VOICE_EN: ${{ vars.ELEVEN_VOICE_EN }}
+          ELEVEN_VOICE_UZ: ${{ vars.ELEVEN_VOICE_UZ }}
+        run: |
+          COUNT="${{ github.event.inputs.count }}"; LANGS="${{ github.event.inputs.langs }}"
+          if [ -z "$COUNT" ]; then COUNT=$(python3 -c "import json;print(json.load(open('video/run.json')).get('count',1))"); fi
+          if [ -z "$LANGS" ]; then LANGS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('langs','ru,en,uz'))"); fi
+          FORMATS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('formats',''))")
+          if [ "${{ github.event_name }}" = "schedule" ]; then COUNT=3; LANGS=ru,en,uz; FORMATS=; fi
+          NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --formats "$FORMATS"
+      - name: Сохранить историю тем
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: video/history.json
+          key: video-history-${{ github.run_id }}
+      - name: Ролики архивом
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trai-video-${{ github.run_id }}
+          path: video/out/*.mp4
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Сценарии и факты
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trai-scripts-${{ github.run_id }}
+          path: video/out/script_*.json
+          retention-days: 30
+          if-no-files-found: ignore
