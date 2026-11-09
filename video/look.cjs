@@ -10,6 +10,10 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   for (const v of views.split(',')) {
+    if (v.startsWith('api:')) { // ответ сервера как есть (проверка источников)
+      const r = await ctx.request.get(SITE + '/api/data?part=' + v.slice(4), { headers: { 'x-trai-view': key }, timeout: 90000 });
+      fs.writeFileSync(`${out}/${v.slice(4)}.json`, await r.text()); console.log(v, r.status()); continue;
+    }
     await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(16000);
     await p.screenshot({ path: `${out}/${v}_${w}.png` }); console.log(v, 'ok');
   }
