@@ -5,6 +5,7 @@ on:
     inputs:
       views: { description: 'разделы через запятую', default: 'watch' }
       size: { description: 'ширина x высота', default: '1920x1080' }
+      news: { description: 'сначала собрать свежие новости на сайте (yes/no)', default: 'no' }
 permissions:
   contents: write
 jobs:
@@ -16,8 +17,15 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1 && npx playwright install --with-deps chromium
+      - name: Свежие новости на тестовом сайте (для глобуса)
+        if: ${{ inputs.news == 'yes' }}
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -sS -m 120 -H "Authorization: Bearer $CRON_SECRET" "https://trai-gold-git-dev-steyn1.vercel.app/api/cron?job=news" | head -c 600; echo
       - env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          DPR: 2
         run: NODE_PATH=/tmp/pw/node_modules node video/look.cjs look_out "${{ inputs.views }}" "${{ inputs.size }}"
       - name: Кадры в ветку look-out
         run: |

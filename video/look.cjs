@@ -6,10 +6,27 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const ctx = await b.newContext({ viewport: { width: w, height: h }, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
+  const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: +(process.env.DPR || 1), locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   for (const v of views.split(',')) {
+    if (v === 'promo') { // кадры для витрины: пример сигнала BUY (только в снимке), «Наблюдатель», уведомления, глобус
+      const AI = { confidence: 72, headline: 'Золото держится над POC — покупка на откате к VWAP, цель у сопротивления', summary: 'Цена закрепилась над контрольной точкой объёма, спрос на физическое золото остаётся сильным, а положительная гамма дилеров гасит резкие падения. Лучший вход — лимит на откате к дневному VWAP, стоп под поддержкой, тейк у сопротивления. Прибыль к риску около 1 : 2.', why: 'Откат к дневному VWAP, стоп за поддержкой, цель — сопротивление.' };
+      await ctx.addInitScript(() => { try { localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.lang', JSON.stringify('ru')); localStorage.setItem('lang', 'ru'); } catch {} });
+      await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(12000);
+      const ok = await p.evaluate(o => { const a = JSON.parse(localStorage.getItem('trai.lastAI') || 'null'); if (!a?.chief) return false; const px = a.price || 4100, e = Math.round(px - 8), st = +(e - 20).toFixed(1), tp = Math.round(e + 42);
+        const set = { direction: 'BUY', type: 'limit', entry: e, stop: st, tp, why: o.why };
+        Object.assign(a.chief, { decision: 'BUY', confidence: o.confidence, headline: o.headline, summary: o.summary, best_setup: set, forced_setup: null });
+        a.entry = { action: 'limit', direction: 'BUY', entry: e, stop: st, tp, comment: o.why }; a.at = Date.now() - 20 * 60e3; localStorage.setItem('trai.lastAI', JSON.stringify(a)); return true; }, AI);
+      console.log('promo_ai', ok); await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(12000);
+      await p.screenshot({ path: `${out}/promo-overview.png` });
+      await p.click('#chAlert').catch(() => {}); await p.waitForTimeout(2500); await p.locator('.chart-panel').screenshot({ path: `${out}/promo-alerts.png` }).catch(e => console.log('alerts', e.message));
+      await p.keyboard.press('Escape'); await p.evaluate(() => { location.hash = 'watch'; }); await p.waitForTimeout(16000); await p.screenshot({ path: `${out}/promo-watch.png` });
+      await p.evaluate(() => { location.hash = 'news'; }); await p.waitForTimeout(8000); await p.evaluate(() => document.querySelector('#nwGlobe')?.scrollIntoView({ block: 'center' })); await p.waitForTimeout(6000);
+      const g = await p.$('#c-globe'); if (g) await g.screenshot({ path: `${out}/promo-globe.png` });
+      console.log('globe markers', await p.evaluate(() => document.querySelectorAll('#c-globe canvas').length));
+      continue;
+    }
     if (v === 'tfcheck') { // проверка масштаба графика при смене таймфреймов
       await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(14000);
       for (const tf of ['W', 'D', '5', '60']) {
