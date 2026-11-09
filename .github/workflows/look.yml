@@ -22,7 +22,10 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sS -m 120 -H "Authorization: Bearer $CRON_SECRET" "https://trai-gold-git-dev-steyn1.vercel.app/api/cron?job=news" | head -c 600; echo
+          for i in 1 2 3 4 5 6; do
+            curl -sS -m 120 -H "Authorization: Bearer $CRON_SECRET" "https://trai-gold-git-dev-steyn1.vercel.app/api/cron?job=news" | head -c 300; echo
+            sleep 20
+          done
       - env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           DPR: 2
