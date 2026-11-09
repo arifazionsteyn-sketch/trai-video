@@ -8,6 +8,7 @@ on:
     paths: ['video/promo.json']
   workflow_dispatch:
 concurrency: { group: promo, cancel-in-progress: true }
+# тема: в video/promo.json поле theme — dark (чёрный фон) или light (белый фон, чёрный ноутбук)
 permissions:
   contents: write
 env:
@@ -32,7 +33,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
           J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=ru; else MODE=reel; L=$J; fi
-          PROMO_STEP=record PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
+          PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") PROMO_STEP=record PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
       - uses: actions/upload-artifact@v4
         with:
           name: rec-${{ matrix.job }}
@@ -64,7 +65,7 @@ jobs:
           J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=ru; else MODE=reel; L=$J; fi
           N=$(python3 -c "import json;print(round(json.load(open('promo_out/$J/job.json'))['total']*60))")
           C=${{ matrix.chunk }}; FROM=$(( N * C / CHUNKS )); TO=$(( N * (C + 1) / CHUNKS ))
-          FROM=$FROM TO=$TO PROMO_STEP=render PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
+          PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") FROM=$FROM TO=$TO PROMO_STEP=render PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
           mkdir -p seg/$J && mv promo_out/$J/seg/* seg/$J/ && cp promo_out/$J/pv_*.jpg promo_out/$J/trai_hero.jpg seg/$J/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
@@ -76,16 +77,17 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
       - uses: actions/download-artifact@v4
         with: { path: seg, pattern: seg-*, merge-multiple: true }
       - name: Склейка
         run: |
-          mkdir -p out
+          mkdir -p out; SUF=$(python3 -c "import json;print('_white' if json.load(open('video/promo.json')).get('theme')=='light' else '')" 2>/dev/null || true)
           for d in seg/*/; do J=$(basename $d); ls $d*.mp4 >/dev/null 2>&1 || continue
             for f in $(ls $d*.mp4 | sort); do echo "file '$PWD/$f'"; done > list_$J.txt
-            if [ "$J" = hero ]; then ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -c copy -movflags +faststart out/trai_hero.mp4; cp $d/trai_hero.jpg out/ 2>/dev/null || true
-            else ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -f lavfi -i anullsrc=r=48000:cl=stereo -c:v copy -c:a aac -b:a 96k -shortest -movflags +faststart out/trai_promo_$J.mp4; fi
+            if [ "$J" = hero ]; then ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -c copy -movflags +faststart out/trai_hero$SUF.mp4; cp $d/trai_hero.jpg out/ 2>/dev/null || true
+            else ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -f lavfi -i anullsrc=r=48000:cl=stereo -c:v copy -c:a aac -b:a 96k -shortest -movflags +faststart out/trai_promo_$J$SUF.mp4; fi
             mkdir -p out/pv_$J && cp $d/pv_*.jpg out/pv_$J/ 2>/dev/null || true
           done; ls -la out
       - name: В Telegram
@@ -93,7 +95,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_REVIEW_CHAT: ${{ secrets.TG_REVIEW_CHAT }}
         run: |
-          for f in out/trai_promo_*.mp4 out/trai_hero.mp4; do
+          for f in out/trai_promo_*.mp4 out/trai_hero*.mp4; do
             [ -f "$f" ] || continue
             if [[ "$f" == *hero* ]]; then WH="-F width=1920 -F height=1080"; else WH="-F width=2160 -F height=3840"; fi
             curl -sS -F chat_id="$TG_REVIEW_CHAT" -F supports_streaming=true $WH -F caption="Промо «ноутбук» · $(basename $f .mp4)" -F video=@"$f;type=video/mp4" "https://api.telegram.org/bot$TG_BOT_TOKEN/sendVideo" | head -c 100; echo

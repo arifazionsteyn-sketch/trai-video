@@ -5,6 +5,7 @@
 const { chromium } = require('playwright'); const crypto = require('crypto'); const fs = require('fs'), path = require('path'), http = require('http');
 const { spawn } = require('child_process');
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
+const THEME = process.env.PROMO_THEME || 'dark';
 const LANG = process.env.PROMO_LANG || 'ru', MODE = process.env.PROMO_MODE || 'reel', HERO = MODE === 'hero';
 const OUT = path.resolve(process.argv[2] || 'promo_out'), DIR = __dirname, FPS = +(process.env.PROMO_FPS || 60);
 const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1, screenW: 1600 } : { w: 1080, h: 1920, scale: 2, rec: 1.5, screenW: 2160 };
@@ -99,7 +100,7 @@ async function doRecord(exe) {
   }
   const last = sections.at(-1);
   sections.push({ key: 'outro', start: t, end: t + OUTRO, kick: '', title: TX.outro[0], sub: TX.outro[1], chip: TX.chip, frames: last.frames.length ? [{ ...last.frames.at(-1), t: 0 }] : [] }); t += OUTRO;
-  const job = { mode: MODE, w: VIEW.w, h: VIEW.h, scale: VIEW.scale, screenW: VIEW.screenW, total: t, sections, bottom: TX.bottom };
+  const job = { theme: THEME, mode: MODE, w: VIEW.w, h: VIEW.h, scale: VIEW.scale, screenW: VIEW.screenW, total: t, sections, bottom: TX.bottom };
   fs.writeFileSync(path.join(OUT, 'job.json'), JSON.stringify(job)); return job;
 }
 
@@ -128,7 +129,7 @@ async function doRender(exe, job, from, to, file) {
 
 (async () => {
   const exe = fs.existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined;
-  const name = HERO ? 'trai_hero' : `trai_promo_${LANG}`;
+  const name = (HERO ? 'trai_hero' : `trai_promo_${LANG}`) + (THEME === 'light' ? '_white' : '');
   if (STEP === 'record') { await doRecord(exe); console.log('запись готова'); return; }
   const job = STEP === 'render' ? JSON.parse(fs.readFileSync(path.join(OUT, 'job.json'), 'utf8')) : await doRecord(exe);
   const n = Math.round(job.total * FPS);

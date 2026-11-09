@@ -19,6 +19,9 @@ html, body { margin: 0; overflow: hidden; background: #050607; }
 #bar i { flex: 1; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; position: relative; }
 #bar i b { position: absolute; inset: 0; width: 0; background: #C9A65F; }
 body.hero .ov, body.hero #bar { display: none; }
+/* светлая тема: белый фон, тёмный текст */
+body.light { background: #F5F5F3; } body.light .ov { color: #111214; } body.light #kick { color: #9C7A35; } body.light #sub { color: #5B5F66; }
+body.light #bot { color: #6B7078; } body.light #bot b { color: #9C7A35; } body.light #bar i { background: rgba(0,0,0,.1); } body.light #bar i b { background: #B8913F; }
 </style></head>
 <body>
 <canvas id="gl"></canvas>
@@ -32,7 +35,8 @@ body.hero .ov, body.hero #bar { display: none; }
 import * as THREE from 'https://esm.sh/three@0.170.0';
 import { RoundedBoxGeometry } from 'https://esm.sh/three@0.170.0/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'https://esm.sh/three@0.170.0/examples/jsm/environments/RoomEnvironment.js';
-const J = window.JOB, SEC = J.sections, HERO = J.mode === 'hero', W = J.w, H = J.h;
+const J = window.JOB, SEC = J.sections, HERO = J.mode === 'hero', W = J.w, H = J.h, LIGHT = J.theme === 'light';
+document.body.classList.toggle('light', LIGHT);
 document.body.classList.toggle('hero', HERO); document.body.style.width = W + 'px'; document.body.style.height = H + 'px';
 const cl = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x)), eo = x => 1 - (1 - cl(x)) ** 3, eio = x => { x = cl(x); return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2; };
 const ss = x => { x = cl(x); return x * x * x * (x * (x * 6 - 15) + 10); }; // очень мягкий разгон и торможение
@@ -44,8 +48,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure
 const scene = new THREE.Scene();
 const pm = new THREE.PMREMGenerator(renderer); scene.environment = pm.fromScene(new RoomEnvironment(), 0.03).texture; scene.environmentIntensity = 0.7;
 // Фон: глубокий чёрный с тёплым золотым ореолом
-const bgC = document.createElement('canvas'); bgC.width = 512; bgC.height = Math.round(512 * H / W); { const x = bgC.getContext('2d'), w = bgC.width, h = bgC.height; x.fillStyle = '#050607'; x.fillRect(0, 0, w, h);
-  const cy = HERO ? h * 0.55 : h * 0.56, g = x.createRadialGradient(w / 2, cy, 4, w / 2, cy, Math.max(w, h) * (HERO ? 0.42 : 0.4)); g.addColorStop(0, 'rgba(201,166,95,.20)'); g.addColorStop(0.45, 'rgba(201,166,95,.06)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }
+const bgC = document.createElement('canvas'); bgC.width = 512; bgC.height = Math.round(512 * H / W); { const x = bgC.getContext('2d'), w = bgC.width, h = bgC.height; x.fillStyle = LIGHT ? '#F5F5F3' : '#050607'; x.fillRect(0, 0, w, h);
+  const cy = HERO ? h * 0.55 : h * 0.56, g = x.createRadialGradient(w / 2, cy, 4, w / 2, cy, Math.max(w, h) * (HERO ? 0.42 : 0.4)); if (LIGHT) { g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.5, 'rgba(250,248,244,.6)'); } else { g.addColorStop(0, 'rgba(201,166,95,.20)'); g.addColorStop(0.45, 'rgba(201,166,95,.06)'); } g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }
 const bgT = new THREE.CanvasTexture(bgC); bgT.colorSpace = THREE.SRGBColorSpace; scene.background = bgT;
 const camera = new THREE.PerspectiveCamera(HERO ? 24 : 30, W / H, 0.05, 100);
 const key = new THREE.DirectionalLight(0xfff4e6, 1.5); key.position.set(-3, 6, 5); scene.add(key);
@@ -54,7 +58,8 @@ const fill = new THREE.DirectionalLight(0xbfd0ff, 0.25); fill.position.set(5, 1,
 
 // ---------- Ноутбук ----------
 const Wd = 3.04, Dp = 2.12, Hb = 0.062, Hl = 0.034, R0 = 0.034;
-const alu = new THREE.MeshPhysicalMaterial({ color: 0x34373c, metalness: 1, roughness: 0.36, clearcoat: 0.25, clearcoatRoughness: 0.5 });
+const alu = LIGHT ? new THREE.MeshPhysicalMaterial({ color: 0x15161a, metalness: 0.85, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.45 }) // чёрный алюминий
+  : new THREE.MeshPhysicalMaterial({ color: 0x34373c, metalness: 1, roughness: 0.36, clearcoat: 0.25, clearcoatRoughness: 0.5 });
 const aluEdge = new THREE.MeshPhysicalMaterial({ color: 0x5a5e66, metalness: 1, roughness: 0.22 });
 const black = new THREE.MeshStandardMaterial({ color: 0x060607, roughness: 0.55, metalness: 0.2 });
 const laptop = new THREE.Group(); scene.add(laptop);
@@ -88,7 +93,7 @@ laptop.add(keys);
 { const pts = []; for (const sx of [-1, 1]) for (let i = 0; i < 26; i++) for (let j = 0; j < 6; j++) pts.push(sx * (kbW / 2 + 0.1 + j * 0.018), Hb + 0.0012, kbZ - kbD / 2 + i * (kbD / 25));
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); laptop.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x0a0a0b, size: 0.007 }))); }
 // тачпад: большой, чуть светлее и глаже
-const pad = new THREE.Mesh(new RoundedBoxGeometry(1.32, 0.003, 0.82, 4, 0.0015), new THREE.MeshPhysicalMaterial({ color: 0x3b3f45, metalness: 0.9, roughness: 0.18 })); pad.position.set(0, Hb + 0.0005, Dp * 0.28); laptop.add(pad);
+const pad = new THREE.Mesh(new RoundedBoxGeometry(1.32, 0.003, 0.82, 4, 0.0015), new THREE.MeshPhysicalMaterial({ color: LIGHT ? 0x1d1f23 : 0x3b3f45, metalness: 0.9, roughness: 0.18 })); pad.position.set(0, Hb + 0.0005, Dp * 0.28); laptop.add(pad);
 // шарнир
 const hingeBar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, Wd * 0.82, 24), black); hingeBar.rotation.z = Math.PI / 2; hingeBar.position.set(0, Hb + 0.006, -Dp / 2 + 0.04); laptop.add(hingeBar);
 const hinge = new THREE.Group(); hinge.position.set(0, Hb + 0.006, -Dp / 2 + 0.04); laptop.add(hinge);
@@ -106,7 +111,7 @@ screen.rotation.x = Math.PI / 2; screen.position.set(0, -0.0035, LD / 2 + (LD - 
 const shine = new THREE.Mesh(new THREE.PlaneGeometry(SW, SH), new THREE.MeshPhysicalMaterial({ color: 0x000000, metalness: 0, roughness: 0.04, transparent: true, opacity: 0.18, clearcoat: 1, clearcoatRoughness: 0.02 }));
 shine.rotation.x = Math.PI / 2; shine.position.copy(screen.position); shine.position.y -= 0.0008; hinge.add(shine);
 // мягкая тень
-const shC = document.createElement('canvas'); shC.width = shC.height = 256; { const x = shC.getContext('2d'); const g = x.createRadialGradient(128, 128, 8, 128, 128, 128); g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(0.6, 'rgba(0,0,0,.35)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, 256, 256); }
+const shC = document.createElement('canvas'); shC.width = shC.height = 256; { const x = shC.getContext('2d'); const g = x.createRadialGradient(128, 128, 8, 128, 128, 128); g.addColorStop(0, `rgba(0,0,0,${LIGHT ? .42 : .85})`); g.addColorStop(0.6, `rgba(0,0,0,${LIGHT ? .14 : .35})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, 256, 256); }
 const shadow = new THREE.Mesh(new THREE.PlaneGeometry(Wd * 1.6, Dp * 1.7), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shC), transparent: true, depthWrite: false }));
 shadow.rotation.x = -Math.PI / 2; shadow.position.y = -0.003; laptop.add(shadow);
 
