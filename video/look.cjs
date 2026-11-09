@@ -10,6 +10,18 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   for (const v of views.split(',')) {
+    if (v === 'tfcheck') { // проверка масштаба графика при смене таймфреймов
+      await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(14000);
+      for (const tf of ['W', 'D', '5', '60']) {
+        await p.click('#tfBtn').catch(() => {}); await p.waitForTimeout(400); await p.click(`#tfMenu [data-tf="${tf}"]`).catch(() => {}); await p.waitForTimeout(5000);
+        const info = await p.evaluate(() => { const c = window.__traiChart; if (!c) return 'нет'; const ps = c.chart.priceScale('right'); const d = c.candles.data(); const lr = c.chart.timeScale().getVisibleLogicalRange();
+          const vis = d.slice(Math.max(0, Math.floor(lr.from)), Math.ceil(lr.to)); const lo = Math.min(...vis.map(b => b.low)), hi = Math.max(...vis.map(b => b.high));
+          const pls = (c.candles.priceLines?.() || []).map(l => l.options().price);
+          return { auto: ps.options().autoScale, bars: d.length, vis: vis.length, lo, hi, extra: c.extra, top: c.candles.coordinateToPrice(0), bottom: c.candles.coordinateToPrice(600), minLow: Math.min(...d.map(b => b.low)), maxHigh: Math.max(...d.map(b => b.high)) }; });
+        console.log('TF', tf, JSON.stringify(info)); await p.screenshot({ path: `${out}/tf_${tf}.png` });
+      }
+      continue;
+    }
     if (v.startsWith('api:')) { // ответ сервера как есть (проверка источников)
       const r = await ctx.request.get(SITE + '/api/data?part=' + v.slice(4), { headers: { 'x-trai-view': key }, timeout: 90000 });
       fs.writeFileSync(`${out}/${v.slice(4)}.json`, await r.text()); console.log(v, r.status()); continue;
