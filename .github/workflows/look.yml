@@ -5,6 +5,8 @@ on:
     inputs:
       views: { description: 'разделы через запятую', default: 'watch' }
       size: { description: 'ширина x высота', default: '1920x1080' }
+permissions:
+  contents: write
 jobs:
   shot:
     runs-on: ubuntu-latest
@@ -17,5 +19,7 @@ jobs:
       - env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: NODE_PATH=/tmp/pw/node_modules node video/look.cjs look_out "${{ inputs.views }}" "${{ inputs.size }}"
-      - uses: actions/upload-artifact@v4
-        with: { name: look, path: look_out/ }
+      - name: Кадры в ветку look-out
+        run: |
+          cd look_out && git init -q -b look-out && git add -A && git -c user.name=bot -c user.email=bot@trai commit -qm look
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" look-out
