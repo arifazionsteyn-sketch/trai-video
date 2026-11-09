@@ -1,5 +1,5 @@
-# Каждые 5 минут: сайт собирает свежие новости и проверяет рынок для агента «Авто-анализ» (бесплатно: публичный репозиторий).
-# Здесь нет кода сайта: только адрес и секретный код из секретов репозитория.
+# Каждые 5 минут (бесплатно: публичный репозиторий): свежие новости, общая проверка сайта (сигналы о входе, журнал, снимки гаммы)
+# и агент «Авто-анализ». Здесь нет кода сайта: только адрес и секретный код из секретов репозитория.
 name: news-live
 # Расписание включим после переноса dev в боевой: старая версия сайта на любое задание запускает общий «watch».
 on:
@@ -12,7 +12,7 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 12
     steps:
       - name: Позвать сайт
         env:
@@ -30,5 +30,14 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           code=$(curl -sS -m 280 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/cron?job=auto" || true)
+          echo "HTTP $code"; head -c 400 out.json; echo
+          [ "$code" = "200" ]
+      - name: Общая проверка сайта
+        if: always()
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS -m 280 -o out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/cron?job=watch" || true)
           echo "HTTP $code"; head -c 400 out.json; echo
           [ "$code" = "200" ]
