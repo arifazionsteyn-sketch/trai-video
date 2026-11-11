@@ -5,13 +5,14 @@ on:
     inputs:
       views: { description: 'разделы через запятую', default: 'watch' }
       size: { description: 'ширина x высота', default: '1920x1080' }
+      dpr: { description: 'плотность пикселей', default: '2' }
       news: { description: 'сначала собрать свежие новости на сайте (yes/no)', default: 'no' }
 permissions:
   contents: write
 jobs:
   shot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,7 +29,7 @@ jobs:
           done
       - env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          DPR: 2
+          DPR: ${{ inputs.dpr }}
         run: NODE_PATH=/tmp/pw/node_modules node video/look.cjs look_out "${{ inputs.views }}" "${{ inputs.size }}"
       - name: Кадры в ветку look-out
         run: |

@@ -8,8 +8,14 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: +(process.env.DPR || 1), locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
-  const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
-  for (const v of views.split(',')) {
+  const p = await ctx.newPage(); const errs = []; let cur = ''; p.on('pageerror', e => errs.push(`[${cur}] ошибка: ${e.message}`));
+  p.on('console', m => { if (m.type() === 'error') errs.push(`[${cur}] консоль: ${m.text().slice(0, 300)}`); });
+  p.on('response', r => { if (r.status() >= 400 && r.url().startsWith(SITE)) errs.push(`[${cur}] ${r.status()} ${r.url().replace(SITE, '').slice(0, 160)}`); });
+  const _log = console.log; const lines = []; console.log = (...a) => { lines.push(a.join(' ')); _log(...a); };
+  for (let v of views.split(',')) {
+    cur = v;
+    if (v.startsWith('m:')) { v = v.slice(2); await p.setViewportSize({ width: 390, height: 844 }); await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000); await p.screenshot({ path: `${out}/m_${v}.png` }); await p.setViewportSize({ width: w, height: h }); continue; }
+    if (v.startsWith('full:')) { v = v.slice(5); await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000); await p.screenshot({ path: `${out}/full_${v}.png`, fullPage: true }); continue; }
     if (v === 'promo') { // кадры для витрины: пример сигнала BUY (только в снимке), «Наблюдатель», уведомления, глобус
       const AI = { confidence: 72, headline: 'Золото держится над POC — покупка на откате к VWAP, цель у сопротивления', summary: 'Цена закрепилась над контрольной точкой объёма, спрос на физическое золото остаётся сильным, а положительная гамма дилеров гасит резкие падения. Лучший вход — лимит на откате к дневному VWAP, стоп под поддержкой, тейк у сопротивления. Прибыль к риску около 1 : 2.', why: 'Откат к дневному VWAP, стоп за поддержкой, цель — сопротивление.' };
       await ctx.addInitScript(() => { try { localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.lang', JSON.stringify('ru')); localStorage.setItem('lang', 'ru'); } catch {} });
@@ -46,5 +52,5 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
     await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(16000);
     await p.screenshot({ path: `${out}/${v}_${w}.png` }); console.log(v, 'ok');
   }
-  console.log(errs.join('\n') || 'без ошибок'); await b.close();
+  console.log(errs.join('\n') || 'без ошибок'); fs.writeFileSync(`${out}/log.txt`, lines.join('\n')); await b.close();
 })();
