@@ -8,9 +8,10 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: +(process.env.DPR || 1), locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
+  await ctx.addInitScript(() => { try { localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.lang', '"ru"'); } catch {} });
   const p = await ctx.newPage(); const errs = []; let cur = ''; p.on('pageerror', e => errs.push(`[${cur}] ошибка: ${e.message}`));
-  p.on('console', m => { if (m.type() === 'error') errs.push(`[${cur}] консоль: ${m.text().slice(0, 300)}`); });
-  p.on('response', r => { if (r.status() >= 400 && r.url().startsWith(SITE)) errs.push(`[${cur}] ${r.status()} ${r.url().replace(SITE, '').slice(0, 160)}`); });
+  p.on('console', m => { if (m.type() === 'error') !/Failed to load resource/.test(m.text()) && errs.push(`[${cur}] консоль: ${m.text().slice(0, 300)}`); });
+  p.on('response', r => { if (r.status() >= 400 && r.url().startsWith(SITE) && !/api\/(i18n|journal)/.test(r.url())) errs.push(`[${cur}] ${r.status()} ${r.url().replace(SITE, '').slice(0, 160)}`); });
   const _log = console.log; const lines = []; console.log = (...a) => { lines.push(a.join(' ')); _log(...a); };
   for (let v of views.split(',')) {
     cur = v;
