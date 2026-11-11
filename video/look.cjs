@@ -14,7 +14,7 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
   const _log = console.log; const lines = []; console.log = (...a) => { lines.push(a.join(' ')); _log(...a); };
   for (let v of views.split(',')) {
     cur = v;
-    if (v.startsWith('m:')) { v = v.slice(2); await p.setViewportSize({ width: 390, height: 844 }); await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000); await p.screenshot({ path: `${out}/m_${v}.png` }); await p.setViewportSize({ width: w, height: h }); continue; }
+    if (v.startsWith('m:')) { v = v.slice(2); await p.setViewportSize({ width: 390, height: 844 }); await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000); await p.screenshot({ path: `${out}/m_${v}.png`, timeout: 60000 }).catch(e => console.log(v, 'моб. кадр не снят')); await p.setViewportSize({ width: w, height: h }); continue; }
     if (v.startsWith('full:')) { v = v.slice(5); await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000); await p.screenshot({ path: `${out}/full_${v}.png`, fullPage: true }); continue; }
     if (v === 'promo') { // кадры для витрины: пример сигнала BUY (только в снимке), «Наблюдатель», уведомления, глобус
       const AI = { confidence: 72, headline: 'Золото держится над POC — покупка на откате к VWAP, цель у сопротивления', summary: 'Цена закрепилась над контрольной точкой объёма, спрос на физическое золото остаётся сильным, а положительная гамма дилеров гасит резкие падения. Лучший вход — лимит на откате к дневному VWAP, стоп под поддержкой, тейк у сопротивления. Прибыль к риску около 1 : 2.', why: 'Откат к дневному VWAP, стоп за поддержкой, цель — сопротивление.' };
@@ -49,8 +49,8 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
       const r = await ctx.request.get(SITE + '/api/data?part=' + v.slice(4), { headers: { 'x-trai-view': key }, timeout: 90000 });
       fs.writeFileSync(`${out}/${v.slice(4)}.json`, await r.text()); console.log(v, r.status()); continue;
     }
-    await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(16000);
-    await p.screenshot({ path: `${out}/${v}_${w}.png` }); console.log(v, 'ok');
+    try { await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(16000);
+    await p.screenshot({ path: `${out}/${v}_${w}.png`, timeout: 60000 }); console.log(v, 'ok'); } catch (e) { console.log(v, 'кадр не снят:', e.message.split('\n')[0]); }
   }
   console.log(errs.join('\n') || 'без ошибок'); fs.writeFileSync(`${out}/log.txt`, lines.join('\n')); await b.close();
 })();
