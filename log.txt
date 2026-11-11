@@ -1,0 +1,8 @@
+radar ok
+api:macro 200
+TF W {"auto":true,"bars":84,"vis":70,"lo":3255.4,"hi":5577.7,"extra":{"min":3972.56,"max":4032.56},"top":6413.0671409515335,"bottom":3315.29035126723,"minLow":3114.8,"maxHigh":5577.7}
+TF D {"auto":true,"bars":400,"vis":100,"lo":3870.8,"hi":4746.5,"extra":{"min":3972.56,"max":4032.56},"top":5061.5028012449975,"bottom":3893.3836371720768,"minLow":3114.8,"maxHigh":5577.7}
+TF 5 {"auto":true,"bars":10455,"vis":110,"lo":3986.1,"hi":4057.61,"extra":{"min":3972.56,"max":4032.56},"top":4088.2037972432195,"bottom":3974.7533748332594,"minLow":3875.88,"maxHigh":4383.11}
+TF 60 {"auto":true,"bars":3411,"vis":100,"lo":3986.5,"hi":4151.19,"extra":{"min":3972.56,"max":4032.56},"top":4215.445967096487,"bottom":3977.166731880836,"minLow":3875.97,"maxHigh":4884.77}
+overview ok
+без ошибок
