@@ -70,13 +70,15 @@ async function record(b) {
   await p.evaluate(() => { location.hash = 'watch'; });
   await p.addStyleTag({ content: 'body[data-view="watch"] .rail,body[data-view="watch"] .statusbar,body[data-view="watch"] .w-edge,body[data-view="watch"] .ag-pill{display:none!important} body[data-view="watch"] main{padding:8px!important} body[data-view="watch"] .w-grid{height:calc(100vh - 16px)!important;min-height:0!important}' });
   console.log('жду в «Наблюдателе»', WATCH_WAIT, 'с'); const tw0 = Date.now();
-  while (Date.now() - tw0 < WATCH_WAIT * 1000) { await p.waitForTimeout(30000); await p.mouse.move(700 + Math.random() * 40, 450).catch(() => {}); }
+  await p.mouse.move(0, 899).catch(() => {}); // курсор в угол — без всплывающих подсказок
+  while (Date.now() - tw0 < WATCH_WAIT * 1000) await p.waitForTimeout(30000);
   if (await loginShown()) throw new Error('во время ожидания сайт выкинул на вход — запись остановлена');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: VIEW.recW, mobile: false }); await p.waitForTimeout(4000);
   const rects = await p.evaluate(() => Object.fromEntries(['chart', 'flow', 'heat', 'fp'].map(k => { const r = document.querySelector('.w-' + k)?.getBoundingClientRect(); return [k, r ? { x: r.x / innerWidth, y: r.y / innerHeight, w: r.width / innerWidth, h: r.height / innerHeight } : null]; })));
   { const fr = []; for (let i = 0; i < WATCH_N; i++) { const d = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 88 }).catch(() => null); if (d) fr.push(d.data); if (i % 40 === 0) console.log('наблюдатель', i); }
     shots.watch = fr; shots.watchRects = rects; console.log('запись watch', fr.length, 'снимков', JSON.stringify(rects)); }
-  await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => {}); await p.waitForTimeout(1500);
+  await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => {});
+  await p.evaluate(() => { location.hash = 'overview'; }); await p.waitForTimeout(7000); // обратно на главную: дальше — план сделки
   for (const [v, , N] of PLAN) {
     if (v.startsWith('watch')) continue;
     if (v === 'chat') { await p.evaluate(() => { location.hash = 'overview'; }); await p.waitForTimeout(1500); await p.click('#chatBtn').catch(() => {}); await p.waitForTimeout(1500); }
