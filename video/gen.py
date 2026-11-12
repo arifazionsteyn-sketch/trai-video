@@ -33,10 +33,10 @@ def log(*a): print(*a, flush=True)
 
 
 # ---------- Gemini ----------
-def gemini(body, timeout=120):
+def gemini(body, timeout=120, models=None, tries=3):
     key = os.environ['GEMINI_SCRIPT_KEY']; last = None; errs = []
-    for m in MODELS:
-        for attempt in range(3):
+    for m in (models or MODELS):
+        for attempt in range(tries):
             try:
                 b2 = json.loads(json.dumps(body))
                 if m.startswith('gemini-3'): b2.setdefault('generationConfig', {})['thinkingConfig'] = {'thinkingLevel': 'low'}
@@ -641,38 +641,117 @@ def story_brief():
     return '\n\n'.join(out)
 
 
+def news_rss(url, n=15):
+    # RSS новостей с кратким описанием и изданием (Bing News, Yahoo Finance, Google News)
+    import xml.etree.ElementTree as ET, html as H
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=20) as r: root = ET.fromstring(r.read())
+    except Exception as e: log('новости:', url[:80], e); return []
+    out = []
+    for it in root.iter('item'):
+        g = lambda tag: next((c.text or '' for c in it if c.tag.split('}')[-1] == tag), '')
+        desc = re.sub(r'\s+', ' ', H.unescape(re.sub('<[^>]+>', ' ', g('description')))).strip()
+        src = g('Source') or g('source') or re.sub(r'^https?://(www\.)?([^/]+).*', r'\2', g('link'))
+        out.append({'title': H.unescape(g('title')).strip(), 'desc': desc[:400], 'date': g('pubDate')[:16], 'src': src.strip()})
+        if len(out) >= n: break
+    return out
+
+
+def bing_news(q, n=15): return news_rss('https://www.bing.com/news/search?' + urllib.parse.urlencode({'q': q, 'format': 'rss', 'setlang': 'en-US', 'qft': 'interval="8"'}), n)
+
+
+def fmt_items(items):
+    seen, out = set(), []
+    for x in items:
+        k = x['title'][:70].lower()
+        if k in seen: continue
+        seen.add(k); out.append(f"[{x['date']}] {x['src']}: {x['title']}" + (f" — {x['desc']}" if x['desc'] and x['desc'][:40] not in x['title'] else ''))
+    return '\n'.join(out)
+
+
+def tavily(q, n=8):
+    tk = os.environ.get('TAVILY_API_KEY')
+    if not tk: return []
+    try:
+        req = urllib.request.Request('https://api.tavily.com/search', data=json.dumps({'api_key': tk, 'query': q, 'topic': 'news', 'days': 7, 'max_results': n}).encode(), headers={'content-type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=40) as r: res = json.load(r).get('results', [])
+        return [{'title': x.get('title', ''), 'desc': (x.get('content') or '')[:700], 'date': (x.get('published_date') or '')[:16], 'src': re.sub(r'^https?://(www\.)?([^/]+).*', r'\2', x.get('url', ''))} for x in res]
+    except Exception as e: log('Tavily:', e); return []
+
+
+RESEARCH_FMT = ('Ответь по-русски строго по пунктам:\n'
+                '1) КАТЕГОРИЯ: одно слово из списка (crypto, stocks, commodities, macro, fx)\n'
+                '2) АКТИВ: название и тикер Yahoo Finance (например NVDA, TSLA, BTC-USD, ETH-USD, CL=F, BZ=F, GC=F, SI=F, HG=F, EURUSD=X, JPY=X, ^GSPC, ^IXIC, DX-Y.NYB); '
+                'до 3 связанных тикеров, если они помогают истории\n'
+                '3) ИСТОРИЯ: заголовок одной строкой\n'
+                '4) ДАТЫ: дата главного события (ГГГГ-ММ-ДД) и других важных моментов\n'
+                '5) ФАКТЫ: 8–12 фактов с точными цифрами (цены, проценты, суммы) и датами; у каждого — издание-источник\n'
+                '6) ЦЕПОЧКА: почему это случилось — 2–4 звена «причина → следствие», только из фактов\n'
+                '7) ПОВОРОТ: неочевидная деталь, которую большинство упускает (подтверждённая фактами)\n'
+                '8) ЧТО ДАЛЬШЕ: ближайшие даты, события и уровни цены, за которыми следит рынок\n'
+                'Правила: только проверенные факты из источников; о людях и компаниях — только то, что сообщили издания, с указанием издания; '
+                'никого не называй виновным; если цифру не нашёл — не пиши её.')
+
+
+def price_facts(sym):
+    # реальные цены закрытия за месяц — модель берёт цифры отсюда, а не из памяти
+    qq = quotes(sym, '1mo', '1d') if sym else None
+    if not qq: return ''
+    b = qq['bars'][-22:]; d = lambda t: datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime('%Y-%m-%d')
+    hi = max(b, key=lambda x: x[2]); lo = min(b, key=lambda x: x[3])
+    return (f'Цены {sym} (дневные свечи, {qq["src"]}): ' + '; '.join(f'{d(x[0])} закрытие {x[4]:.2f}' for x in b[-12:]) +
+            f'. Максимум месяца {hi[2]:.2f} ({d(hi[0])}), минимум {lo[3]:.2f} ({d(lo[0])}), изменение за месяц {(b[-1][4] / b[0][1] - 1) * 100:+.1f}%.')
+
+
 def research_story(hist, avoid_cats):
     today = datetime.date.today().isoformat()
     recent = [f"{h.get('topic')} [{h.get('asset', '')}]" for h in hist[-30:]]
     cats = [c for c in CATS if c not in avoid_cats] or list(CATS)
-    prompt = (f'Сегодня {today}. Найди поиском Google самые обсуждаемые истории на финансовых рынках за последние 7 дней и выбери ОДНУ — '
-              'для короткого вертикального ролика (45 секунд). Нужна история с сильным крючком, точными цифрами и понятной цепочкой «что случилось → почему → что дальше»: '
-              'резкий обвал или взлёт акции (отчёт, скандал, смена CEO, сделка, суд), движение биткоина или крипто-компаний, нефть, серебро, решения ФРС, инфляция, валюты.\n'
-              f'Категория — одна из: {"; ".join(f"{c} — {CATS[c]}" for c in cats)}.\n'
-              f'Не повторяй истории и активы прошлых роликов: {"; ".join(recent) or "—"}.\n\n'
-              'Заголовки последней недели (для ориентира, факты проверь поиском):\n' + (story_brief() or '(нет)') + '\n\n'
-              'Ответь по-русски строго по пунктам:\n'
-              '1) КАТЕГОРИЯ: одно слово из списка (crypto, stocks, commodities, macro, fx)\n'
-              '2) АКТИВ: название и тикер Yahoo Finance (например NVDA, TSLA, BTC-USD, ETH-USD, CL=F, BZ=F, GC=F, SI=F, HG=F, EURUSD=X, JPY=X, ^GSPC, ^IXIC, DX-Y.NYB); '
-              'до 3 связанных тикеров, если они помогают истории\n'
-              '3) ИСТОРИЯ: заголовок одной строкой\n'
-              '4) ДАТЫ: дата главного события (ГГГГ-ММ-ДД) и других важных моментов\n'
-              '5) ФАКТЫ: 8–12 фактов с точными цифрами (цены, проценты, суммы) и датами; у каждого — издание-источник\n'
-              '6) ЦЕПОЧКА: почему это случилось — 2–4 звена «причина → следствие», только из фактов\n'
-              '7) ПОВОРОТ: неочевидная деталь, которую большинство упускает (подтверждённая фактами)\n'
-              '8) ЧТО ДАЛЬШЕ: ближайшие даты, события и уровни цены, за которыми следит рынок\n'
-              'Правила: только проверенные факты из найденных источников; о людях и компаниях — только то, что сообщили издания, с указанием издания; '
-              'никого не называй виновным; если цифру не нашёл — не пиши её.')
-    body = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}], 'tools': [{'google_search': {}}], 'generationConfig': {'temperature': 0.8, 'maxOutputTokens': 8000}}
-    try: txt, cand, model = gemini(body)
-    except Exception as e:
-        log('поиск Google не сработал:', e); body.pop('tools'); txt, cand, model = gemini(body); model += ' (без поиска — проверь цифры!)'
-    src = []
-    for ch in ((cand.get('groundingMetadata') or {}).get('groundingChunks') or []):
-        w = ch.get('web') or {}
-        if w.get('title') and w.get('title') not in src: src.append(w['title'])
-    m = re.search(r'КАТЕГОРИЯ:\s*\**\s*([a-z]+)', txt)
-    return txt, src[:8], model, (m.group(1) if m and m.group(1) in CATS else '')
+    ask = (f'Сегодня {today}. Выбери ОДНУ самую обсуждаемую историю на финансовых рынках за последние 7 дней для короткого вертикального ролика (45 секунд). '
+           'Нужна история с сильным крючком, точными цифрами и понятной цепочкой «что случилось → почему → что дальше»: резкий обвал или взлёт акции '
+           '(отчёт, скандал, смена CEO, сделка, суд), движение биткоина или крипто-компаний, нефть, серебро, решения ФРС, инфляция, валюты.\n'
+           f'Категория — одна из: {"; ".join(f"{c} — {CATS[c]}" for c in cats)}.\n'
+           f'Не повторяй истории и активы прошлых роликов: {"; ".join(recent) or "—"}.\n\n')
+    heads = story_brief()
+    # 1) Gemini с поиском Google (если ключ это позволяет)
+    body = {'contents': [{'role': 'user', 'parts': [{'text': ask + 'Факты проверь поиском Google. Заголовки недели для ориентира:\n' + (heads or '(нет)') + '\n\n' + RESEARCH_FMT}]}],
+            'tools': [{'google_search': {}}], 'generationConfig': {'temperature': 0.8, 'maxOutputTokens': 8000}}
+    try:
+        txt, cand, model = gemini(body, models=MODELS[:2], tries=2)
+        src = []
+        for ch in ((cand.get('groundingMetadata') or {}).get('groundingChunks') or []):
+            w = ch.get('web') or {}
+            if w.get('title') and w.get('title') not in src: src.append(w['title'])
+        if src:
+            m = re.search(r'КАТЕГОРИЯ:\s*\**\s*([a-z]+)', txt)
+            return txt, src[:8], model, (m.group(1) if m and m.group(1) in CATS else '')
+        log('поиск Google не дал источников — беру новости RSS')
+    except Exception as e: log('поиск Google недоступен ключу:', str(e)[:200])
+    # 2) Без поиска Google: выбор истории по свежим заголовкам с описаниями, затем факты только из найденных заметок и реальных котировок
+    pool = []
+    for q in ('stock plunges', 'shares soar', 'stock falls after CEO', 'earnings stock reaction', 'bitcoin price', 'crypto market', 'oil prices', 'silver price', 'Federal Reserve rates', 'inflation report markets', 'dollar yen euro'):
+        pool += bing_news(q, 8)
+    pool_txt = fmt_items(pool)
+    pick_body = {'contents': [{'role': 'user', 'parts': [{'text': ask + 'Выбирай ТОЛЬКО из этих заметок последней недели (дата, издание, заголовок — описание):\n' + pool_txt + '\n\nЗаголовки Google News:\n' + (heads or '(нет)') +
+                 '\n\nОтветь JSON: {"category": "...", "asset": "тикер Yahoo", "query": "короткий поисковый запрос по-английски об этой истории", "headline": "заголовок по-русски"}'}]}],
+                 'generationConfig': {'temperature': 0.7, 'responseMimeType': 'application/json'}}
+    pk, _, _ = gemini(pick_body); pk = json.loads(pk.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
+    if isinstance(pk, list): pk = pk[0]
+    q, asset = pk.get('query') or pk.get('headline'), (pk.get('asset') or '').strip()
+    log('история по заголовкам:', pk)
+    notes = bing_news(q, 20) + news_rss('https://news.google.com/rss/search?' + urllib.parse.urlencode({'q': q + ' when:7d', 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'}), 12) + tavily(q)
+    if asset and not asset.startswith('^') and '=' not in asset: notes += news_rss(f'https://feeds.finance.yahoo.com/rss/2.0/headline?s={urllib.parse.quote(asset)}&region=US&lang=en-US', 12)
+    if len(notes) < 4: raise RuntimeError('мало свежих заметок по истории — ролик не делаю, чтобы не выдумывать факты')
+    pf = price_facts(asset)
+    body2 = {'contents': [{'role': 'user', 'parts': [{'text': f'Сегодня {today}. История: {pk.get("headline")} ({asset}).\n'
+             'Ниже — ВСЕ, что известно: свежие заметки (дата, издание, заголовок — описание) и реальные котировки. Используй ТОЛЬКО эти данные: '
+             'каждый факт — из заметки, с названием издания; цены — только из котировок. Чего нет в заметках — не пиши, не дополняй по памяти.\n\n'
+             'ЗАМЕТКИ:\n' + fmt_items(notes) + '\n\nКОТИРОВКИ:\n' + (pf or '(нет)') + '\n\n' + RESEARCH_FMT}]}],
+             'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 8000}}
+    txt, _, model = gemini(body2)
+    src = list(dict.fromkeys(x['src'] for x in notes if x['src']))[:8]
+    cat = pk.get('category') if pk.get('category') in CATS else ''
+    return txt, src, model + ' (по свежим новостям Bing/Google/Yahoo)', cat
 
 
 TONE = {'type': 'STRING', 'enum': ['up', 'down', 'gold', 'blue']}
@@ -779,6 +858,7 @@ def make_script_story(facts):
 QUOTES = {}
 UA = {'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
 RANGE_DAYS = {'5d': 5, '1mo': 31, '3mo': 92, '6mo': 183, '1y': 366}
+NASDAQ_IDX = {'^GSPC': 'SPX', '^IXIC': 'COMP', '^DJI': 'INDU', '^NDX': 'NDX', '^RUT': 'RUT'}
 STOOQ = {'GC=F': 'gc.f', 'SI=F': 'si.f', 'CL=F': 'cl.f', 'BZ=F': 'cb.f', 'HG=F': 'hg.f', 'NG=F': 'ng.f', '^GSPC': '^spx', '^IXIC': '^ndq', '^DJI': '^dji', 'DX-Y.NYB': 'dx.f'}
 
 
@@ -801,6 +881,18 @@ def quotes(sym, rng='1mo', interval='1d'):
             with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=20) as r: rows = json.load(r)
             out = {'bars': [[int(x[0]), float(x[5]), float(x[3]), float(x[4]), float(x[2])] for x in rows], 'currency': 'USD', 'src': 'Gate'}
         except Exception as e: log('Gate', sym, e)
+    if not out and (re.fullmatch(r'[A-Z][A-Z.]{0,5}', sym) or sym in NASDAQ_IDX):  # акции, фонды и индексы США — Nasdaq (Yahoo часто отвечает 429 серверам GitHub)
+        ns, classes = (NASDAQ_IDX[sym], ['index']) if sym in NASDAQ_IDX else (sym.replace('.', '-'), ['stocks', 'etf'])
+        td = datetime.date.today(); fd = td - datetime.timedelta(days=max(16, RANGE_DAYS[rng]))
+        num = lambda v: float(str(v).replace('$', '').replace(',', '').strip())
+        for ac in classes:
+            try:
+                u = f'https://api.nasdaq.com/api/quote/{ns}/historical?assetclass={ac}&fromdate={fd}&limit=400&todate={td}'
+                with urllib.request.urlopen(urllib.request.Request(u, headers={**UA, 'accept': 'application/json, text/plain, */*', 'origin': 'https://www.nasdaq.com', 'referer': 'https://www.nasdaq.com/'}), timeout=20) as r: j = json.load(r)
+                rows = (((j.get('data') or {}).get('tradesTable') or {}).get('rows') or [])
+                bars = [[int(datetime.datetime.strptime(x['date'], '%m/%d/%Y').replace(tzinfo=datetime.timezone.utc).timestamp()), num(x['open']), num(x['high']), num(x['low']), num(x['close'])] for x in rows if x.get('open') not in (None, '', 'N/A')][::-1]
+                if len(bars) >= 3: out = {'bars': bars, 'currency': 'USD', 'src': 'Nasdaq'}; break
+            except Exception as e: log('Nasdaq', sym, ac, e)
     if not out and interval != '1h':  # дневные — Stooq
         try:
             st = STOOQ.get(sym) or (sym[:6].lower() if sym.endswith('=X') else sym.lower() + '.us')
