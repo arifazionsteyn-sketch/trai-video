@@ -8,22 +8,29 @@ const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app')
 const THEME = process.env.PROMO_THEME || 'dark';
 const LANG = process.env.PROMO_LANG || 'ru', MODE = process.env.PROMO_MODE || 'reel', HERO = MODE === 'hero';
 const OUT = path.resolve(process.argv[2] || 'promo_out'), DIR = __dirname, FPS = +(process.env.PROMO_FPS || 60);
-const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1, screenW: 1600 } : { w: 1080, h: 1920, scale: 2, rec: 1.5, screenW: 2160 };
+// rec — плотность записи сайта, recW — для «Наблюдателя» (в ролике наезд на каждый его блок, поэтому пишем плотнее)
+const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1.5, recW: 2.5, screenW: 2400 } : { w: 1080, h: 1920, scale: 2, rec: 2, recW: 3, screenW: 3200 };
+const WATCH_WAIT = +(process.env.PROMO_WATCH_WAIT || 720); // секунд ждём в «Наблюдателе» до записи — Heatmap и «Внутри свечи» успевают прорисоваться
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
 const TX = {
   ru: { kick: 'TRAI · ИИ-аналитик золота', intro: ['Золото глазами<br>15 ИИ-агентов', ''], overview: ['План сделки', 'вход · стоп · тейк на графике'], agents: ['15 ИИ-агентов', 'спорят и выносят один вердикт'],
     chat: ['Чат с ИИ', 'спроси — ответит с уровнями'], flow: ['Поток ордеров', 'стаканы и крупные сделки бирж'], strange: ['Доктор Стрэндж', '50 000 сценариев цены'], gamma: ['Гамма 3D', 'где дилеры держат цену'], news: ['Карта событий', 'мировые новости и золото'],
+    watch: ['Наблюдатель', 'весь рынок на одном экране'], watch_heat: ['Heatmap', 'где стоят крупные заявки'], watch_fp: ['Внутри свечи', 'покупки и продажи на каждой цене'], watch_flow: ['Поток ордеров', 'стаканы и сделки вживую'],
     outro: ['TRAI', 'ИИ-аналитик золота XAU/USD'], chip: 'Первый анализ бесплатно', bottom: 'Telegram <b>@trai_agent_bot</b>' },
   en: { kick: 'TRAI · AI gold analyst', intro: ['Gold through the eyes<br>of 15 AI agents', ''], overview: ['Trade plan', 'entry · stop · take-profit on the chart'], agents: ['15 AI agents', 'debate and reach one verdict'],
     chat: ['AI chat', 'ask anything — get levels back'], flow: ['Order flow', 'order books and big trades'], strange: ['Doctor Strange', '50,000 price scenarios'], gamma: ['Gamma 3D', 'where dealers hold the price'], news: ['Event map', 'world news and gold'],
-    outro: ['TRAI', 'AI gold analyst XAU/USD'], chip: 'First analysis free', bottom: 'Telegram <b>@trai_agent_bot</b>' },
+    watch: ['Watch mode', 'the whole market on one screen'], watch_heat: ['Liquidity heatmap', 'where the big orders sit'], watch_fp: ['Inside the candle', 'buyers vs sellers at every price'], watch_flow: ['Live order flow', 'order books and trades as they hit'],
+    outro: ['TRAI', 'AI gold analyst · XAU/USD'], chip: 'First analysis free', bottom: 'Telegram <b>@trai_agent_bot</b> · <b>trai-agent.com</b>' },
   uz: { kick: 'TRAI · oltin bo‘yicha AI-analitik', intro: ['Oltin 15 ta<br>AI-agent nigohida', ''], overview: ['Savdo rejasi', 'kirish · stop · teyk grafikda'], agents: ['15 ta AI-agent', 'bahslashib, bitta xulosa chiqaradi'],
     chat: ['AI bilan chat', 'so‘rang — darajalar bilan javob beradi'], flow: ['Buyurtmalar oqimi', 'birjalar kitobi va yirik savdolar'], strange: ['Doktor Strendj', '50 000 ta narx ssenariysi'], gamma: ['Gamma 3D', 'dilerlar narxni qayerda ushlaydi'], news: ['Voqealar xaritasi', 'dunyo yangiliklari va oltin'],
+    watch: ['Kuzatuvchi', 'butun bozor bitta ekranda'], watch_heat: ['Heatmap', 'yirik buyurtmalar qayerda turibdi'], watch_fp: ['Sham ichida', 'har bir narxda xarid va sotuv'], watch_flow: ['Buyurtmalar oqimi', 'kitob va savdolar jonli'],
     outro: ['TRAI', 'oltin bo‘yicha AI-analitik'], chip: 'Birinchi tahlil bepul', bottom: 'Telegram <b>@trai_agent_bot</b>' },
 }[LANG];
 // [раздел, секунд в ролике, сколько снимков записать]
-const PLAN = [['overview', 3.4, 72], ['chat', 2.6, 52], ['agents', 2.2, 46], ['flow', 2.0, 42], ['strange', 2.2, 46], ['gamma', 3.2, 66], ['news', 3.0, 62]];
-const INTRO = 2.0, OUTRO = 1.2;
+// watch_* — один непрерывный «Наблюдатель» на весь экран (запись WATCH_N снимков делится между ними), в ролике камера наезжает на блок
+const PLAN = [['overview', 3.0, 64], ['chat', 2.2, 46], ['agents', 2.2, 46], ['watch', 3.0], ['watch_heat', 3.2], ['watch_fp', 2.9], ['watch_flow', 2.5], ['strange', 2.4, 50], ['gamma', 2.8, 58], ['news', 2.8, 58]];
+const WATCH_N = 240, ZOOM = { watch_heat: 'heat', watch_fp: 'fp', watch_flow: 'flow' };
+const INTRO = 2.0, OUTRO = 1.4;
 // Пример сигнала и диалога в чате для ролика (только в записи, на сайте ничего не меняется). Уровни — от текущего графика.
 const DEMO = {
   ru: { head: 'Золото держится над POC — покупка на откате к VWAP, цель у сопротивления', sum: 'Цена закрепилась над контрольной точкой объёма, спрос на физическое золото остаётся сильным, положительная гамма дилеров гасит резкие падения. Лучший вход — лимит на откате к дневному VWAP, стоп под поддержкой, тейк у сопротивления. Прибыль к риску около 1 : 2.',
@@ -56,7 +63,18 @@ async function record(b) {
   console.log('пример сигнала', ok); await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(10000);
   const peek = () => p.evaluate(() => document.querySelector('.rail')?.classList.add('peek')).catch(() => {});
   const shots = {};
+  // «Наблюдатель» во весь экран: без нижней панели и строки состояния; ждём, пока Heatmap и «Внутри свечи» наберут историю
+  await p.evaluate(() => { location.hash = 'watch'; });
+  await p.addStyleTag({ content: 'body[data-view="watch"] .rail,body[data-view="watch"] .statusbar,body[data-view="watch"] .w-edge,body[data-view="watch"] .ag-pill{display:none!important} body[data-view="watch"] main{padding:8px!important} body[data-view="watch"] .w-grid{height:calc(100vh - 16px)!important;min-height:0!important}' });
+  console.log('жду в «Наблюдателе»', WATCH_WAIT, 'с'); const tw0 = Date.now();
+  while (Date.now() - tw0 < WATCH_WAIT * 1000) { await p.waitForTimeout(30000); await p.mouse.move(700 + Math.random() * 40, 450).catch(() => {}); }
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: VIEW.recW, mobile: false }); await p.waitForTimeout(4000);
+  const rects = await p.evaluate(() => Object.fromEntries(['chart', 'flow', 'heat', 'fp'].map(k => { const r = document.querySelector('.w-' + k)?.getBoundingClientRect(); return [k, r ? { x: r.x / innerWidth, y: r.y / innerHeight, w: r.width / innerWidth, h: r.height / innerHeight } : null]; })));
+  { const fr = []; for (let i = 0; i < WATCH_N; i++) { const d = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 88 }).catch(() => null); if (d) fr.push(d.data); if (i % 40 === 0) console.log('наблюдатель', i); }
+    shots.watch = fr; shots.watchRects = rects; console.log('запись watch', fr.length, 'снимков', JSON.stringify(rects)); }
+  await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => {}); await p.waitForTimeout(1500);
   for (const [v, , N] of PLAN) {
+    if (v.startsWith('watch')) continue;
     if (v === 'chat') { await p.evaluate(() => { location.hash = 'overview'; }); await p.waitForTimeout(1500); await p.click('#chatBtn').catch(() => {}); await p.waitForTimeout(1500); }
     else { if (v !== 'overview') await p.evaluate(() => document.body.classList.remove('chat-on'));
       if (v !== 'overview') { await p.evaluate(v => { location.hash = v; }, v); await p.waitForTimeout(v === 'flow' ? 9000 : v === 'gamma' || v === 'news' ? 8000 : 6500); } }
@@ -87,16 +105,21 @@ async function record(b) {
 }
 
 const STEP = process.env.PROMO_STEP || 'all'; // record — только запись разделов (кадры + job.json); render — кадры FROM..TO в отдельный кусок; all — всё сразу
-const encArgs = () => HERO ? ['-c:v', 'libx264', '-preset', 'slow', '-crf', '24', '-maxrate', '5M', '-bufsize', '10M'] : ['-c:v', 'libx264', '-preset', 'slow', '-crf', '18', '-maxrate', '20M', '-bufsize', '40M'];
+const encArgs = () => HERO ? ['-c:v', 'libx264', '-preset', 'slow', '-crf', '21', '-maxrate', '8M', '-bufsize', '16M'] : ['-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-maxrate', '40M', '-bufsize', '80M', '-tune', 'film'];
 
 async function doRecord(exe) {
   fs.mkdirSync(path.join(OUT, 'f'), { recursive: true });
   const rb = await chromium.launch({ executablePath: exe, args: ['--no-sandbox'] }); const shots = await record(rb); await rb.close();
   const sections = [{ key: 'intro', start: 0, end: INTRO, kick: TX.kick, title: TX.intro[0], sub: TX.intro[1], frames: [] }];
   let t = INTRO;
+  const wTot = PLAN.filter(([v]) => v.startsWith('watch')).reduce((a, [, s]) => a + s, 0); let wPos = 0;
   for (const [v, secs] of PLAN) {
-    const fr = shots[v] || []; const list = fr.map((d, i) => { const name = `f/${v}_${String(i).padStart(3, '0')}.jpg`; fs.writeFileSync(path.join(OUT, name), Buffer.from(d, 'base64')); return { src: '/out/' + name, t: fr.length > 1 ? i / (fr.length - 1) * secs : 0 }; });
-    sections.push({ key: v, start: t, end: t + secs, kick: TX.kick, title: TX[v][0], sub: TX[v][1], frames: list }); t += secs;
+    let fr = shots[v] || [], tag = v;
+    if (v.startsWith('watch')) { const all = shots.watch || [], a = Math.floor(all.length * wPos / wTot), b = Math.floor(all.length * (wPos + secs) / wTot); fr = all.slice(a, Math.max(a + 2, b)); tag = 'watch' + Math.round(wPos * 10); wPos += secs; }
+    const list = fr.map((d, i) => { const name = `f/${tag}_${String(i).padStart(3, '0')}.jpg`; fs.writeFileSync(path.join(OUT, name), Buffer.from(d, 'base64')); return { src: '/out/' + name, t: fr.length > 1 ? i / (fr.length - 1) * secs : 0 }; });
+    const r = ZOOM[v] && shots.watchRects?.[ZOOM[v]], pad = 0.006;
+    const zoom = r ? { x: Math.max(0, r.x - pad), y: Math.max(0, r.y - pad), w: Math.min(1, r.w + 2 * pad), h: Math.min(1, r.h + 2 * pad) } : null;
+    sections.push({ key: v, start: t, end: t + secs, kick: TX.kick, title: TX[v][0], sub: TX[v][1], frames: list, zoom }); t += secs;
   }
   const last = sections.at(-1);
   sections.push({ key: 'outro', start: t, end: t + OUTRO, kick: '', title: TX.outro[0], sub: TX.outro[1], chip: TX.chip, frames: last.frames.length ? [{ ...last.frames.at(-1), t: 0 }] : [] }); t += OUTRO;
@@ -117,7 +140,7 @@ async function doRender(exe, job, from, to, file) {
   const pv = new Set([1.0, 2.2, 3.5, 5.5, 7.4, 9.4, 11.2, 13.0, 14.6].map(x => Math.round(x * FPS))); const t0 = Date.now();
   for (let i = from; i < to; i++) {
     await p.evaluate(tt => window.render(tt), i / FPS);
-    const buf = await p.screenshot({ type: 'jpeg', quality: 94 });
+    const buf = await p.screenshot({ type: 'jpeg', quality: 97 });
     if (pv.has(i)) fs.writeFileSync(path.join(path.dirname(file), `pv_${String(i).padStart(4, '0')}.jpg`), buf);
     if (HERO && i === Math.round(5.5 * FPS)) fs.writeFileSync(path.join(path.dirname(file), 'trai_hero.jpg'), buf);
     if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once('drain', r));

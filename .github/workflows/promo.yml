@@ -1,4 +1,4 @@
-# Промо «ноутбук»: вертикальные 4K-ролики (RU/EN/UZ, 60 к/с, с подписями) и горизонтальный ролик без слов для витрины.
+# Промо «ноутбук»: вертикальный 4K-ролик (60 к/с, с подписями; языки — поле langs в promo.json) и горизонтальный ролик без слов для витрины (интерфейс на английском).
 # Запуск: изменить video/promo.json в ветке dev или кнопка «Run workflow». Итог — в Telegram (видео) и ветка promo-out.
 # 1) rec — запись живых разделов сайта; 2) render — кадры рисуются кусками параллельно (4K на процессоре медленный); 3) join — склейка, звук, отправка.
 name: promo
@@ -12,15 +12,15 @@ concurrency: { group: promo, cancel-in-progress: true }
 permissions:
   contents: write
 env:
-  CHUNKS: 8
+  CHUNKS: 12
 jobs:
   rec:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
-        job: [ru, en, uz, hero]
+        job: [en, hero]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,7 +32,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
         run: |
-          J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=ru; else MODE=reel; L=$J; fi
+          J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=en; else MODE=reel; L=$J; fi
           PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") PROMO_STEP=record PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
       - uses: actions/upload-artifact@v4
         with:
@@ -46,8 +46,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        job: [ru, en, uz, hero]
-        chunk: [0, 1, 2, 3, 4, 5, 6, 7]
+        job: [en, hero]
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,7 +62,7 @@ jobs:
           path: promo_out/
       - name: Кадры куска
         run: |
-          J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=ru; else MODE=reel; L=$J; fi
+          J=${{ matrix.job }}; if [ "$J" = hero ]; then MODE=hero; L=en; else MODE=reel; L=$J; fi
           N=$(python3 -c "import json;print(round(json.load(open('promo_out/$J/job.json'))['total']*60))")
           C=${{ matrix.chunk }}; FROM=$(( N * C / CHUNKS )); TO=$(( N * (C + 1) / CHUNKS ))
           PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") FROM=$FROM TO=$TO PROMO_STEP=render PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
@@ -97,6 +97,9 @@ jobs:
         run: |
           for f in out/trai_promo_*.mp4 out/trai_hero*.mp4; do
             [ -f "$f" ] || continue
+            # Telegram принимает видео до 50 МБ: если больше — отдельная копия с подобранным битрейтом (полное качество — в ветке promo-out)
+            SZ=$(stat -c%s "$f"); if [ "$SZ" -gt 49000000 ]; then D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$f"); BR=$(python3 -c "print(int(46e6*8/float('$D')/1000)-200)")
+              ffmpeg -v error -y -i "$f" -c:v libx264 -preset slow -b:v ${BR}k -maxrate ${BR}k -bufsize $((BR*2))k -c:a copy -movflags +faststart "${f%.mp4}_tg.mp4"; f="${f%.mp4}_tg.mp4"; fi
             if [[ "$f" == *hero* ]]; then WH="-F width=1920 -F height=1080"; else WH="-F width=2160 -F height=3840"; fi
             curl -sS -F chat_id="$TG_REVIEW_CHAT" -F supports_streaming=true $WH -F caption="Промо «ноутбук» · $(basename $f .mp4)" -F video=@"$f;type=video/mp4" "https://api.telegram.org/bot$TG_BOT_TOKEN/sendVideo" | head -c 100; echo
           done

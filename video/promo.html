@@ -120,7 +120,16 @@ const cache = new Map();
 const img = src => { if (cache.has(src)) return cache.get(src); const p = new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); cache.set(src, p); if (cache.size > 60) cache.delete(cache.keys().next().value); return p; };
 const frameAt = (s, t) => { const x = t - s.start, f = s.frames; let i = 0; while (i + 1 < f.length && f[i + 1].t <= x) i++; const j = Math.min(f.length - 1, i + 1); const w = j === i ? 0 : cl((x - f[i].t) / ((f[j].t - f[i].t) || 1)); return [f[i].src, f[j].src, w]; };
 const FX = 'brightness(1.16) saturate(1.5) contrast(1.08)'; // ярче и сочнее — чтобы бросалось в глаза
-const drawSec = async (s, t, alpha = 1) => { const [a, b, w] = frameAt(s, t); sx.filter = FX; sx.globalAlpha = alpha; sx.drawImage(await img(a), 0, 0, scr.width, scr.height); if (w > 0.02) { sx.globalAlpha = alpha * w; sx.drawImage(await img(b), 0, 0, scr.width, scr.height); } sx.globalAlpha = 1; sx.filter = 'none'; };
+// наезд на блок экрана (zoom — доля кадра {x,y,w,h}); переход от прошлого кадрирования плавный, с сохранением пропорций экрана
+const FULL = { x: 0, y: 0, w: 1, h: 1 }, ASP = 1.6;
+const fitR = r => { if (!r) return FULL; let { x, y, w, h } = r; const a = (w / h) * ASP; // a>1 — блок шире экрана
+  if (a > 1) { const nh = h * a; y -= (nh - h) / 2; h = nh; } else { const nw = w / a; x -= (nw - w) / 2; w = nw; }
+  x = cl(x, 0, 1 - w); y = cl(y, 0, 1 - h); return { x, y, w: Math.min(1, w), h: Math.min(1, h) }; };
+const zoomAt = (s, t) => { const i = SEC.indexOf(s), p = SEC[i - 1], from = fitR(p && p.key.startsWith('watch') && s.key.startsWith('watch') ? p.zoom : null), to = fitR(s.zoom), k = ss((t - s.start) / 0.7);
+  if (!s.key.startsWith('watch')) return FULL; const L = (a, b) => a + (b - a) * k; return { x: L(from.x, to.x), y: L(from.y, to.y), w: L(from.w, to.w), h: L(from.h, to.h) }; };
+const drawSec = async (s, t, alpha = 1) => { const [a, b, w] = frameAt(s, t), z = zoomAt(s, t); sx.filter = FX; sx.globalAlpha = alpha; sx.imageSmoothingQuality = 'high';
+  const put = async src => { const im = await img(src); sx.drawImage(im, z.x * im.width, z.y * im.height, z.w * im.width, z.h * im.height, 0, 0, scr.width, scr.height); };
+  await put(a); if (w > 0.02) { sx.globalAlpha = alpha * w; await put(b); } sx.globalAlpha = 1; sx.filter = 'none'; };
 // фирменный знак TRAI (три узла, связанных линиями) со свечением
 function mark(k) {
   const cx = scr.width / 2, cy = scr.height / 2, s = scr.height * 0.0011 * (0.86 + 0.14 * eo(k));
@@ -158,7 +167,7 @@ window.render = async t => {
   sx.fillStyle = '#050607'; sx.fillRect(0, 0, scr.width, scr.height);
   if (cur === intro) mark((t - 0.7) / 1.3);
   else if (cur.frames?.length) {
-    const fade = ss((t - cur.start) / 0.35);
+    const fade = prev && prev.key.startsWith('watch') && cur.key.startsWith('watch') ? 1 : ss((t - cur.start) / 0.35);
     if (fade < 1) { if (prev === intro) mark(1); else if (prev?.frames?.length) await drawSec(prev, prev.end - 0.001); }
     await drawSec(cur, t, fade);
   }
