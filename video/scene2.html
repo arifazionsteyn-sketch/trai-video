@@ -1,0 +1,563 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-Black.otf");font-weight:900}
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-Bold.otf");font-weight:700}
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-SemiBold.otf");font-weight:600}
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-Medium.otf");font-weight:500}
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-Regular.otf");font-weight:400}
+@font-face{font-family:"ID";src:url("fonts/InterDisplay-Light.otf");font-weight:300}
+@font-face{font-family:"IN";src:url("fonts/Inter-Regular.otf");font-weight:400}
+@font-face{font-family:"IN";src:url("fonts/Inter-Medium.otf");font-weight:500}
+@font-face{font-family:"IN";src:url("fonts/Inter-SemiBold.otf");font-weight:600}
+@font-face{font-family:"IN";src:url("fonts/Inter-Bold.otf");font-weight:700}
+@font-face{font-family:"IN";src:url("fonts/Inter-ExtraBold.otf");font-weight:800}
+html,body{margin:0;background:#000}
+canvas{display:block}
+</style></head>
+<body><canvas id="c" width="1080" height="1920"></canvas>
+<script>
+// TRAI — ролики v2 «история рынка». Строгий стиль данных: тёмный фон, картинка — главная, мелкая подпись сверху,
+// внутри каждой сцены 2–3 «удара» (beats) точно на словах диктора — картинка меняется каждые 1,5–3 секунды.
+// Всё берётся из window.JOB (пишет gen.py): сцены с типом и данными, время слов для субтитров, язык.
+// render(t) рисует кадр в момент t без таймеров — кадры одинаковы при каждом рендере.
+// Концовка — утверждённая (поиск trai-agent.com → знак TRAI), 2 с.
+const W = 1080, H = 1920, cv = document.getElementById('c'), x = cv.getContext('2d');
+const GOLD = '#D9B46A', GOLD_HI = '#FBEFC8', GOLD_LO = '#9C722E', TXT = '#F2F3F5', MUT = '#9AA0A9', FAINT = '#646A73', UP = '#2FBF8A', DOWN = '#E5525F', MUTED = MUT;
+const RGB = { gold: '217,180,106', up: '47,191,138', down: '229,82,95', txt: '242,243,245', blue: '111,168,220' };
+const cl = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const eo = p => 1 - Math.pow(1 - cl(p), 3);                                   // плавное торможение
+const eio = p => { p = cl(p); return p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; };
+const eb = p => { p = cl(p); const c = 1.7; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); }; // с перелётом
+const seg = (t, a, d) => cl((t - a) / Math.max(1e-6, d));
+const rr = (px, py, w, h, r) => { x.beginPath(); x.roundRect(px, py, w, h, r); };
+const J = window.JOB;
+const LOC = { ru: 'ru-RU', en: 'en-US', uz: 'ru-RU' }[J.lang] || 'en-US';
+const num = (v, d = 0) => Number(v).toLocaleString(LOC, { minimumFractionDigits: d, maximumFractionDigits: d }).replace(/ /g, ' ').replace(/-/g, '−');
+const money = (v, d = 0, pre = '', suf = '') => (v < 0 ? '−' : '') + pre + num(Math.abs(v), d) + suf;
+const TOTAL = J.total, OUT = J.outro;
+const tone = s => (s === 'up' ? UP : s === 'down' ? DOWN : s === 'blue' ? '#6FA8DC' : GOLD);
+const toneR = s => RGB[s] || RGB.gold;
+
+// Подбор размера шрифта под ширину
+function fit(text, weight, fam, size, maxW, min = 28) { let s = size; for (; s > min; s -= 2) { x.font = `${weight} ${s}px ${fam}`; if (x.measureText(text).width <= maxW) break; } return s; }
+// Перенос по словам
+function wrap(text, maxW) { const out = []; let cur = ''; for (const w of String(text).split(/\s+/)) { const t = cur ? cur + ' ' + w : w; if (x.measureText(t).width > maxW && cur) { out.push(cur); cur = w; } else cur = t; } if (cur) out.push(cur); return out; }
+
+// ---------- Фон: глубокий чёрный, еле заметная сетка точек, тёплый свет снизу ----------
+function bg(t) {
+  const g0 = x.createLinearGradient(0, 0, 0, H); g0.addColorStop(0, '#08090C'); g0.addColorStop(1, '#040506'); x.fillStyle = g0; x.fillRect(0, 0, W, H);
+  const g = x.createRadialGradient(W / 2, H * 0.62, 40, W / 2, H * 0.62, 980), a = 0.075 + Math.sin(t * 0.7) * 0.012;
+  g.addColorStop(0, `rgba(217,180,106,${a})`); g.addColorStop(0.6, 'rgba(217,180,106,0.02)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.fillStyle = 'rgba(255,255,255,0.045)';
+  const off = (t * 6) % 60;
+  for (let i = 30; i < W; i += 60) for (let j = 30 - off; j < H; j += 60) { x.fillRect(i, j, 2, 2); }
+  const v = x.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.78); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.6)'); x.fillStyle = v; x.fillRect(0, 0, W, H);
+}
+
+// ---------- Шапка: ник слева, «02 / 06» справа, сегменты прогресса по сценам ----------
+function plane(cx, cy, r) {
+  x.save(); x.translate(cx, cy); x.fillStyle = 'rgba(217,180,106,0.14)'; x.beginPath(); x.arc(0, 0, r, 0, 7); x.fill();
+  const k = r / 22; x.scale(k, k); x.fillStyle = GOLD_HI;
+  x.beginPath(); x.moveTo(-11, -1); x.lineTo(12, -10); x.lineTo(7, 11); x.lineTo(1, 5); x.lineTo(-3, 9); x.lineTo(-3, 3); x.lineTo(8, -6); x.lineTo(-4, 2); x.closePath(); x.fill(); x.restore();
+}
+function header(t) {
+  if (t > OUT) return;
+  const al = eo(seg(t, 0, 0.4)); x.save(); x.globalAlpha = al;
+  plane(92, 132, 20); x.font = '600 28px IN'; x.fillStyle = 'rgba(242,243,245,0.7)'; x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillText(J.handle || '@trai_agent_bot', 124, 133);
+  const SC = J.scenes, n = SC.length, cur = Math.max(0, SC.findIndex(s => t >= s.start && t < s.end));
+  x.textAlign = 'right'; x.font = '600 26px IN'; x.fillStyle = 'rgba(242,243,245,0.5)';
+  const lab = String(cur + 1).padStart(2, '0') + ' / ' + String(n).padStart(2, '0'); x.fillText(lab, W - 70, 133);
+  // сегменты
+  const gap = 8, w0 = (W - 140 - gap * (n - 1)) / n;
+  SC.forEach((s, i) => {
+    const px = 70 + i * (w0 + gap), p = cl((t - s.start) / Math.max(0.1, s.end - s.start));
+    x.fillStyle = 'rgba(255,255,255,0.09)'; rr(px, 176, w0, 4, 2); x.fill();
+    if (p > 0) { x.fillStyle = i === cur ? GOLD : 'rgba(217,180,106,0.55)'; rr(px, 176, Math.max(4, w0 * p), 4, 2); x.fill(); }
+  });
+  x.restore(); x.textBaseline = 'alphabetic';
+  // предупреждение — мелко в первые секунды
+  if (J.disclaimer && t < (SC[0]?.end || 3)) { const d = eo(seg(t, 0.3, 0.4)) * (1 - seg(t, (SC[0]?.end || 3) - 0.3, 0.3)); x.save(); x.globalAlpha = d * 0.7; x.font = '500 22px IN'; x.fillStyle = FAINT; x.textAlign = 'left'; x.fillText(J.disclaimer, 70, 222); x.restore(); }
+}
+
+// ---------- Вход и выход сцены: подъём снизу с проявлением, уход вверх ----------
+function vis(t, s) { const pin = eo(seg(t, s.start, 0.38)), pout = eio(seg(t, s.end - 0.24, 0.24)); return { a: pin * (1 - pout), dy: (1 - pin) * 46 - pout * 36 }; }
+// Время удара: из сцены (на словах диктора) или равномерно
+function beatT(s, i, frac) { const b = s.beats || []; if (b[i] != null) return b[i]; return s.start + (s.end - s.start) * frac; }
+// Маленькая подпись капсом
+function kicker(text, y, al = 1, col = GOLD) {
+  if (!text) return; x.save(); x.globalAlpha *= al; x.letterSpacing = '7px'; const up = String(text).toUpperCase(); const s = fit(up, 600, 'IN', 26, 900, 18);
+  x.font = `600 ${s}px IN`; x.fillStyle = col; x.textAlign = 'center'; x.fillText(up, W / 2 + 3, y); x.restore(); x.letterSpacing = '0px';
+}
+// Заголовок: тонкие буквы, ключевые слова — жирным золотом («LOST 7 OF 10»)
+function title(text, y, size, accent, al = 1, maxW = 940) {
+  if (!text) return; const acc = new Set(String(accent || '').toLowerCase().split(/\s+/).filter(Boolean));
+  const lines = String(text).toUpperCase().split('\n').slice(0, 2);
+  x.save(); x.globalAlpha *= al; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
+  let s = size; for (const ln of lines) { for (; s > 48; s -= 4) { x.font = `300 ${s}px ID`; if (x.measureText(ln).width * 1.06 <= maxW) break; } }
+  lines.forEach((ln, li) => {
+    const words = ln.split(' '); x.letterSpacing = '-1px';
+    const ws = words.map(w => { const hot = acc.has(w.toLowerCase().replace(/[^\p{L}\p{N}%$]/gu, '')) || acc.has(w.toLowerCase()); x.font = `${hot ? 700 : 300} ${s}px ID`; return { w, hot, wd: x.measureText(w).width }; });
+    const sp = s * 0.26, tw = ws.reduce((q, o) => q + o.wd, 0) + sp * (ws.length - 1); let cx = W / 2 - tw / 2;
+    for (const o of ws) { x.font = `${o.hot ? 700 : 300} ${s}px ID`; x.fillStyle = o.hot ? GOLD : TXT; x.fillText(o.w, cx, y + li * s * 1.05); cx += o.wd + sp; }
+  });
+  x.restore(); x.letterSpacing = '0px';
+}
+function source(t, s) {
+  if (!s.source) return; const al = eo(seg(t, s.start + 0.6, 0.4)) * (1 - seg(t, s.end - 0.25, 0.25)); if (al <= 0) return;
+  x.save(); x.globalAlpha = al * 0.85; const f = fit(s.source, 500, 'IN', 24, 900, 16); x.font = `500 ${f}px IN`; x.fillStyle = FAINT; x.textAlign = 'center'; x.fillText(s.source, W / 2, 1405); x.restore();
+}
+function pill(px, py, text, col, al = 1, size = 30, fill = true) {
+  x.save(); x.globalAlpha *= al; x.font = `700 ${size}px IN`; const w = x.measureText(text).width + size * 0.9, h = size * 1.5;
+  if (fill) { x.fillStyle = col; rr(px - w / 2, py - h / 2, w, h, h / 2); x.fill(); x.fillStyle = '#0A0B0E'; } else { x.strokeStyle = col; x.lineWidth = 2; rr(px - w / 2, py - h / 2, w, h, h / 2); x.stroke(); x.fillStyle = col; }
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(text, px, py + 1); x.restore(); x.textBaseline = 'alphabetic'; return w;
+}
+
+// ================== СЦЕНЫ ==================
+const SC = {};
+
+// Крючок: заголовок тонкими буквами + огромное число, которое считается; за ним бледная линия цены
+SC.hook = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330);
+  title(s.title, 470, 112, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  // фоновая линия
+  const pts = s.series && s.series.length > 4 ? s.series : synth(s.dir === 'down' ? -1 : s.dir === 'up' ? 1 : 0, 70, 7);
+  const pr = eo(seg(t, s.start + 0.15, Math.min(2.2, (s.end - s.start) * 0.7)));
+  line(pts, 80, 1000, 1000, 1360, pr, s.dir === 'down' ? RGB.down : s.dir === 'up' ? RGB.up : RGB.gold, 0.55, true);
+  if (s.value != null) {
+    const b1 = beatT(s, 0, 0.35), p = eo(seg(t, b1 - 0.15, 0.9)), pop = eb(seg(t, b1 - 0.15, 0.35));
+    if (pop > 0) {
+      const val = (s.from != null ? s.from + (s.value - s.from) * p : s.value * p);
+      const txt = money(val, s.decimals || 0, s.prefix || '', s.suffix || '');
+      x.save(); x.translate(W / 2, 880); const k = 0.82 + 0.18 * pop; x.scale(k, k);
+      const f = fit(txt, 900, 'ID', 230, 980, 80); x.font = `900 ${f}px ID`; x.letterSpacing = '-4px';
+      x.fillStyle = s.value < 0 || s.dir === 'down' ? DOWN : s.dir === 'up' ? UP : TXT; x.textAlign = 'center'; x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 30; x.fillText(txt, 0, 0); x.restore(); x.letterSpacing = '0px';
+      if (s.label) { x.save(); x.globalAlpha *= eo(seg(t, b1 + 0.25, 0.4)); x.font = `500 ${fit(s.label, 500, 'IN', 40, 900)}px IN`; x.fillStyle = MUT; x.textAlign = 'center'; x.fillText(s.label, W / 2, 960); x.restore(); }
+    }
+  }
+  x.restore(); source(t, s);
+};
+
+// Свечи настоящего графика: рисуются на глазах, отметка события, процент изменения считается, уровни
+SC.candles = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330);
+  if (s.title) title(s.title, 440, 84, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const B = s.bars || []; if (!B.length) { x.restore(); return; }
+  const X0 = 70, X1 = 880, Y0 = s.title ? 640 : 560, Y1 = 1300, N = B.length;
+  let lo = Math.min(...B.map(b => b[2])), hi = Math.max(...B.map(b => b[1]));
+  for (const l of s.levels || []) { lo = Math.min(lo, l.price); hi = Math.max(hi, l.price); }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const Y = p => Y1 - (p - lo) / (hi - lo || 1) * (Y1 - Y0), step = (X1 - X0) / N, cw = Math.max(3, step * 0.62), Xc = i => X0 + step * (i + 0.5);
+  const b1 = beatT(s, 0, 0.45), reveal = eio(seg(t, s.start + 0.15, Math.max(0.8, b1 - s.start - 0.1)));
+  // сетка цен
+  x.save(); x.font = '500 22px IN'; x.textAlign = 'right'; x.textBaseline = 'middle';
+  for (let k = 0; k <= 3; k++) { const p = lo + (hi - lo) * (k + 0.5) / 4, yy = Math.round(Y(p)) + .5; x.strokeStyle = 'rgba(255,255,255,0.05)'; x.lineWidth = 1; x.beginPath(); x.moveTo(X0, yy); x.lineTo(X1 + 16, yy); x.stroke(); x.fillStyle = FAINT; x.fillText(num(p, p < 10 ? 2 : p < 1000 ? 1 : 0), 1012, yy); }
+  x.textBaseline = 'alphabetic';
+  x.restore();
+  const shown = reveal * N;
+  // заливка под закрытиями
+  const cls = B.map(b => b[3]), upAll = cls[N - 1] >= B[0][0], colR = upAll ? RGB.up : RGB.down;
+  x.save(); x.beginPath(); let started = false;
+  for (let i = 0; i < N && i < shown; i++) { const xx = Xc(i), yy = Y(cls[i]); started ? x.lineTo(xx, yy) : x.moveTo(xx, yy); started = true; }
+  if (started) {
+    const lastI = Math.min(N - 1, Math.floor(shown - 0.001)); x.lineTo(Xc(lastI), Y1); x.lineTo(Xc(0), Y1); x.closePath();
+    const gr = x.createLinearGradient(0, Y0, 0, Y1); gr.addColorStop(0, `rgba(${colR},0.16)`); gr.addColorStop(1, `rgba(${colR},0)`); x.fillStyle = gr; x.fill();
+  }
+  x.restore();
+  // свечи
+  for (let i = 0; i < N; i++) {
+    const pi = cl(shown - i); if (pi <= 0) break;
+    const [o, h, l, c] = B[i], up = c >= o, col = up ? UP : DOWN, xx = Xc(i);
+    const yo = Y(o), yc = Y(o + (c - o) * eo(pi)), yh = Y(o + (h - o) * eo(pi)), yl = Y(o + (l - o) * eo(pi));
+    x.globalAlpha = v.a * (0.35 + 0.65 * cl(pi * 2));
+    x.fillStyle = col; x.fillRect(xx - 1, Math.min(yh, yl), 2, Math.max(1, Math.abs(yl - yh)));
+    x.fillRect(xx - cw / 2, Math.min(yo, yc), cw, Math.max(2, Math.abs(yc - yo)));
+  }
+  x.globalAlpha = v.a;
+  // уровни (второй удар)
+  const b2 = beatT(s, 1, 0.7);
+  (s.levels || []).forEach((lv, k) => {
+    const p = eo(seg(t, b2 - 0.1 + k * 0.18, 0.45)); if (p <= 0) return; const yy = Math.round(Y(lv.price)) + .5, c = tone(lv.tone);
+    x.save(); x.globalAlpha *= p; x.strokeStyle = c; x.setLineDash([10, 8]); x.lineWidth = 2; x.beginPath(); x.moveTo(X0, yy); x.lineTo(X0 + (X1 - X0) * p, yy); x.stroke(); x.setLineDash([]);
+    x.font = '700 22px IN'; x.letterSpacing = '3px'; const lt = String(lv.label || num(lv.price)).toUpperCase(), lw = x.measureText(lt).width; x.fillStyle = 'rgba(6,7,10,0.85)'; rr(X0 + 4, yy - 40, lw + 20, 32, 6); x.fill(); x.fillStyle = c; x.textAlign = 'left'; x.fillText(lt, X0 + 14, yy - 17); x.restore(); x.letterSpacing = '0px';
+  });
+  // отметка события
+  if (s.mark != null && s.mark >= 0 && s.mark < N) {
+    const pm = eb(seg(t, Math.max(b1, s.start + (s.mark + 1) / N * (b1 - s.start)), 0.4));
+    if (pm > 0 && shown > s.mark) {
+      const xx = Xc(s.mark), yy = Y(B[s.mark][1]);
+      x.save(); x.globalAlpha *= cl(pm); x.strokeStyle = 'rgba(242,243,245,0.55)'; x.setLineDash([4, 6]); x.lineWidth = 2; x.beginPath(); x.moveTo(xx, Y0 - 10); x.lineTo(xx, Y1); x.stroke(); x.setLineDash([]);
+      x.fillStyle = TXT; x.beginPath(); x.arc(xx, yy - 18, 7 * cl(pm), 0, 7); x.fill();
+      if (s.mark_label) { const lx = cl(xx, 230, 850); x.translate(lx, Y0 - 44); const k = 0.85 + 0.15 * pm; x.scale(k, k); pill(0, 0, String(s.mark_label).toUpperCase(), TXT, 1, 26); }
+      x.restore();
+    }
+  }
+  // изменение за период (считается) и ярлык цены
+  const c0 = s.base || B[0][0], cN = B[N - 1][3], ch = (cN / c0 - 1) * 100, pc = eo(seg(t, s.start + 0.2, Math.max(0.8, b1 - s.start)));
+  const lastI = Math.min(N - 1, Math.floor(shown - 0.001)), curP = B[Math.max(0, lastI)][3], curCh = (curP / c0 - 1) * 100;
+  x.save(); x.textAlign = 'left'; const chTxt = (curCh >= 0 ? '+' : '−') + num(Math.abs(curCh), 1) + '%';
+  x.font = '800 92px ID'; x.letterSpacing = '-2px'; x.fillStyle = curCh >= 0 ? UP : DOWN; x.globalAlpha *= eo(seg(t, s.start + 0.3, 0.4)); x.fillText(chTxt, X0, Y0 - (s.title ? 40 : 60)); x.letterSpacing = '0px';
+  if (s.period) { const w = x.measureText(chTxt).width; x.font = '500 30px IN'; x.fillStyle = MUT; x.fillText(String(s.period), X0 + w + 22, Y0 - (s.title ? 52 : 72)); }
+  x.restore();
+  if (lastI >= 0) { const yy = Y(curP); x.save(); x.globalAlpha *= eo(seg(t, s.start + 0.4, 0.4)); x.strokeStyle = curCh >= 0 ? UP : DOWN; x.setLineDash([3, 5]); x.lineWidth = 1.5; x.beginPath(); x.moveTo(Xc(lastI), Math.round(yy) + .5); x.lineTo(925, Math.round(yy) + .5); x.stroke(); x.setLineDash([]); pill(975, yy, money(curP, curP < 10 ? 2 : curP < 1000 ? 2 : 0, s.prefix || ''), curCh >= 0 ? UP : DOWN, 1, 22); x.restore(); void pc; void ch; }
+  x.restore(); source(t, s);
+};
+
+// Число: считается; «было → стало» с перечёркиванием (1 990 → 0)
+SC.counter = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 460, 96, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const d = s.decimals || 0, col = s.tone ? tone(s.tone) : s.value < 0 ? DOWN : GOLD_HI;
+  const b1 = beatT(s, 0, 0.3), b2 = beatT(s, 1, 0.62);
+  if (s.from != null) {
+    // старое значение, потом перечёркивание и новое
+    const p0 = eo(seg(t, s.start + 0.15, 0.4)), strike = eio(seg(t, b1, 0.35)), p1 = eb(seg(t, b1 + 0.25, 0.45));
+    const oldT = money(s.from, d, s.prefix || '', s.suffix || ''), f0 = fit(oldT, 900, 'ID', 150, 900, 60);
+    x.save(); x.globalAlpha *= p0 * (1 - 0.55 * strike); x.font = `900 ${f0}px ID`; x.textAlign = 'center'; x.fillStyle = TXT; x.fillText(oldT, W / 2, 780);
+    const tw = x.measureText(oldT).width; x.strokeStyle = DOWN; x.lineWidth = 12; x.lineCap = 'round'; x.beginPath(); x.moveTo(W / 2 - tw / 2 - 10, 735); x.lineTo(W / 2 - tw / 2 - 10 + (tw + 20) * strike, 735 - 30 * strike); x.stroke(); x.restore();
+    if (p1 > 0) {
+      const val = s.from + (s.value - s.from) * eo(seg(t, b1 + 0.25, 0.8)), newT = money(val, d, s.prefix || '', s.suffix || '');
+      x.save(); x.translate(W / 2, 1050); const k = 0.7 + 0.3 * p1; x.scale(k, k); const f1 = fit(newT, 900, 'ID', 230, 980, 80); x.font = `900 ${f1}px ID`; x.letterSpacing = '-4px';
+      x.textAlign = 'center'; x.fillStyle = col; x.shadowColor = `rgba(${s.tone ? toneR(s.tone) : RGB.gold},.35)`; x.shadowBlur = 40; x.fillText(newT, 0, 0); x.restore(); x.letterSpacing = '0px';
+    }
+  } else {
+    const early = b1 - s.start > 2.2, tA = early ? s.start + 0.45 : b1 - 0.2, p = eo(seg(t, tA, 1.0)), pop = eb(seg(t, tA, 0.4)), val = s.value * p, txt = money(val, d, s.prefix || '', s.suffix || '');
+    const bump = early ? Math.exp(-Math.max(0, t - b1) * 7) * (t >= b1 ? 1 : 0) : 0;
+    x.save(); x.translate(W / 2, 960); const k = (0.8 + 0.2 * pop) * (1 + 0.07 * bump); x.scale(k, k); const f = fit(money(s.value, d, s.prefix || '', s.suffix || ''), 900, 'ID', 250, 980, 80); x.font = `900 ${f}px ID`; x.letterSpacing = '-5px';
+    x.textAlign = 'center'; x.fillStyle = col; x.shadowColor = `rgba(${s.tone ? toneR(s.tone) : RGB.gold},.3)`; x.shadowBlur = 50; x.fillText(txt, 0, 0); x.restore(); x.letterSpacing = '0px';
+  }
+  if (s.label) { const p = eo(seg(t, b2 - 0.1, 0.4)); x.save(); x.globalAlpha *= p; x.font = `500 ${fit(s.label, 500, 'IN', 40, 900)}px IN`; x.fillStyle = MUT; x.textAlign = 'center'; x.fillText(s.label, W / 2, (s.ref ? 1110 : 1180) + (1 - p) * 20); x.restore(); }
+  if (s.ref && s.ref.value) {
+    // шкала: где цена сейчас и где уровень, между ними — расстояние в процентах
+    const pg = eo(seg(t, s.start + 0.3, 0.5)), pf = eio(seg(t, s.start + 0.7, 1.1)), a0 = 170, a1 = 910, gy = 1290;
+    const lvR = s.value < s.ref.value, xa = lvR ? a0 : a1, xb = lvR ? a1 : a0, xc = xb + (xa - xb) * pf, cR = s.tone ? tone(s.tone) : GOLD;
+    x.save(); x.globalAlpha *= pg; x.fillStyle = 'rgba(255,255,255,0.08)'; rr(a0, gy - 3, a1 - a0, 6, 3); x.fill();
+    const g = x.createLinearGradient(xb, 0, xa, 0); g.addColorStop(0, 'rgba(242,243,245,0.6)'); g.addColorStop(1, cR); x.fillStyle = g; rr(Math.min(xb, xc), gy - 3, Math.abs(xc - xb), 6, 3); x.fill();
+    x.fillStyle = TXT; x.beginPath(); x.arc(xb, gy, 11, 0, 7); x.fill(); x.fillStyle = cR; x.beginPath(); x.arc(xa, gy, 11 * (0.4 + 0.6 * pf), 0, 7); x.fill();
+    x.font = '600 26px IN'; x.textAlign = lvR ? 'right' : 'left'; x.fillStyle = TXT; x.fillText(s.ref.label || '', xb, gy + 52); x.font = '700 30px IN'; x.fillText(money(s.ref.value, d, s.prefix || ''), xb, gy - 26);
+    x.textAlign = lvR ? 'left' : 'right'; x.font = '600 26px IN'; x.fillStyle = cR; x.fillText(s.ref.target || '', xa, gy + 52);
+    if (s.ref.gap) { x.globalAlpha *= eo(seg(t, s.start + 1.6, 0.4)); pill((a0 + a1) / 2, gy - 34, s.ref.gap, cR, 1, 26, false); }
+    x.restore();
+  } else {
+    // тонкая шкала под числом заполняется
+    const pb = eio(seg(t, b1, 1.2)); x.fillStyle = 'rgba(255,255,255,0.07)'; rr(240, 1240, 600, 6, 3); x.fill(); const g = x.createLinearGradient(240, 0, 840, 0); g.addColorStop(0, GOLD_LO); g.addColorStop(1, GOLD_HI); x.fillStyle = g; rr(240, 1240, 600 * pb, 6, 3); x.fill();
+  }
+  x.restore(); source(t, s);
+};
+
+// Цепочка «причина → следствие»: блоки появляются по одному на словах диктора
+SC.chain = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 84, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const it = (s.items || []).slice(0, 4), n = it.length; if (!n) { x.restore(); return; }
+  const bh = 150, gap = 74, total = n * bh + (n - 1) * gap, y0 = Math.max(560, 990 - total / 2), bw = 860, bx = W / 2 - bw / 2;
+  let active = -1;
+  it.forEach((o, i) => {
+    const tb = beatT(s, i, 0.12 + i * (0.8 / n)), p = eb(seg(t, tb - 0.1, 0.45)); if (p <= 0) return; active = i;
+    const yy = y0 + i * (bh + gap);
+    if (i > 0) { // стрелка от предыдущего
+      const pa = eo(seg(t, tb - 0.25, 0.3)), ax = W / 2, ay0 = yy - gap + 8, ay1 = yy - 10;
+      x.save(); x.strokeStyle = 'rgba(217,180,106,0.8)'; x.lineWidth = 3; x.beginPath(); x.moveTo(ax, ay0); x.lineTo(ax, ay0 + (ay1 - ay0) * pa); x.stroke();
+      if (pa > 0.9) { x.fillStyle = GOLD; x.beginPath(); x.moveTo(ax - 11, ay1 - 12); x.lineTo(ax + 11, ay1 - 12); x.lineTo(ax, ay1 + 2); x.closePath(); x.fill(); } x.restore();
+    }
+    x.save(); x.globalAlpha *= cl(p); x.translate(W / 2, yy + bh / 2); const k = 0.9 + 0.1 * p; x.scale(k, k); x.translate(-W / 2, -(yy + bh / 2));
+    x.fillStyle = 'rgba(18,20,26,0.95)'; rr(bx, yy, bw, bh, 22); x.fill(); x.lineWidth = 2; x.strokeStyle = 'rgba(255,255,255,0.08)'; x.stroke();
+    x.restore();
+  });
+  // активный блок — золотая рамка, прошлые — приглушены
+  it.forEach((o, i) => {
+    const tb = beatT(s, i, 0.12 + i * (0.8 / n)), p = eo(seg(t, tb - 0.1, 0.45)); if (p <= 0) return;
+    const yy = y0 + i * (bh + gap), on = i === active;
+    x.save(); x.globalAlpha *= p * (on ? 1 : 0.55);
+    if (on) { x.strokeStyle = 'rgba(217,180,106,0.85)'; x.lineWidth = 3; rr(bx, yy, bw, bh, 22); x.stroke(); }
+    x.textAlign = 'left'; const f = fit(o.label, 700, 'ID', 54, bw - 90, 30); x.font = `700 ${f}px ID`; x.fillStyle = on ? TXT : MUT; x.fillText(o.label, bx + 44, yy + (o.sub ? 70 : 92));
+    if (o.sub) { x.font = `500 ${fit(o.sub, 500, 'IN', 30, bw - 90, 20)}px IN`; x.fillStyle = on ? GOLD : FAINT; x.fillText(o.sub, bx + 44, yy + 116); }
+    x.restore();
+  });
+  x.restore(); source(t, s);
+};
+
+// Два столбика: сравнение и «×N»
+SC.versus = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 92, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const A = s.a || {}, B = s.b || {}, mx = Math.max(Math.abs(A.value || 1), Math.abs(B.value || 1)), floorY = 1290, maxH = 560;
+  const b1 = beatT(s, 0, 0.3), b2 = beatT(s, 1, 0.65);
+  [[A, 330, b1, A.tone || 'gold'], [B, 750, b1 + 0.35, B.tone || 'txt']].forEach(([o, cx, tb, tn]) => {
+    const p = eo(seg(t, tb - 0.2, 0.9)), h = maxH * Math.abs(o.value || 0) / mx * p, w = 230;
+    const c = tn === 'txt' ? '242,243,245' : toneR(tn), g = x.createLinearGradient(0, floorY - maxH, 0, floorY); g.addColorStop(0, `rgba(${c},0.95)`); g.addColorStop(1, `rgba(${c},0.35)`);
+    x.fillStyle = g; rr(cx - w / 2, floorY - h, w, Math.max(2, h), 14); x.fill();
+    x.globalAlpha = v.a * eo(seg(t, tb + 0.4, 0.3)); x.textAlign = 'center'; x.font = `800 ${fit(o.display || '', 800, 'ID', 64, 300, 30)}px ID`; x.fillStyle = TXT; x.fillText(o.display || '', cx, floorY - h - 28);
+    x.globalAlpha = v.a; x.font = `600 ${fit(o.label || '', 600, 'IN', 36, 380, 20)}px IN`; x.fillStyle = MUT; x.fillText(o.label || '', cx, floorY + 60);
+  });
+  x.strokeStyle = 'rgba(255,255,255,0.15)'; x.lineWidth = 2; x.beginPath(); x.moveTo(140, floorY + .5); x.lineTo(940, floorY + .5); x.stroke();
+  if (s.badge) { const pb = eb(seg(t, b2, 0.4)); if (pb > 0) { x.save(); x.translate(W / 2, 740); x.scale(cl(pb, 0, 1.15), cl(pb, 0, 1.15)); pill(0, 0, s.badge, GOLD, 1, 64); x.restore(); } }
+  x.restore(); source(t, s);
+};
+
+// Сетка кубиков: «потерял 7 из 10»
+SC.grid = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 104, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const total = cl(Math.round(s.total || 10), 4, 100), k = cl(Math.round(s.count || 0), 0, total), cols = total <= 10 ? 5 : 10, rows = Math.ceil(total / cols);
+  const cs = total <= 5 ? 160 : cols === 5 ? 140 : 72, gap = cols === 5 ? 26 : 14, gw = cols * cs + (cols - 1) * gap, gx = W / 2 - gw / 2, gy = 720 + (rows <= 2 ? 80 : 0);
+  const b1 = beatT(s, 0, 0.4), c = tone(s.tone || 'down'), cR = toneR(s.tone || 'down');
+  for (let i = 0; i < total; i++) {
+    const r = Math.floor(i / cols), cc = i % cols, p = eb(seg(t, s.start + 0.1 + i * 0.02, 0.4)); if (p <= 0) continue;
+    const hot = i < k, ph = hot ? eo(seg(t, b1 + i * (0.9 / Math.max(1, k)), 0.3)) : 0;
+    const px = gx + cc * (cs + gap), py = gy + r * (cs + gap) + (1 - cl(p)) * 30, d = cs * 0.16;
+    x.save(); x.globalAlpha *= cl(p);
+    // кубик: верхняя грань светлее
+    x.fillStyle = ph > 0 ? `rgba(${cR},${0.25 + 0.55 * ph})` : 'rgba(255,255,255,0.06)'; rr(px, py + d, cs, cs - d, 10); x.fill();
+    x.fillStyle = ph > 0 ? `rgba(${cR},${0.45 + 0.5 * ph})` : 'rgba(255,255,255,0.11)'; rr(px, py, cs, d * 1.6, 10); x.fill();
+    if (ph > 0) { x.shadowColor = c; x.shadowBlur = 24 * ph; x.strokeStyle = `rgba(${cR},${0.9 * ph})`; x.lineWidth = 2; rr(px, py, cs, cs, 10); x.stroke(); }
+    x.restore();
+  }
+  if (s.label) { const p = eo(seg(t, beatT(s, 1, 0.75), 0.4)); x.save(); x.globalAlpha *= p; x.font = `500 ${fit(s.label, 500, 'IN', 40, 900)}px IN`; x.fillStyle = MUT; x.textAlign = 'center'; x.fillText(s.label, W / 2, gy + rows * (cs + gap) + 70); x.restore(); }
+  x.restore(); source(t, s);
+};
+
+// Лента времени (вертикальная): даты и события, бегунок переходит по ударам
+SC.timeline = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 88, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const it = (s.items || []).slice(0, 5), n = it.length; if (!n) { x.restore(); return; }
+  const lx = 210, y0 = 640, y1 = 1300, stepY = n > 1 ? (y1 - y0) / (n - 1) : 0;
+  const pl = eio(seg(t, s.start + 0.1, 0.8)); x.strokeStyle = 'rgba(255,255,255,0.14)'; x.lineWidth = 3; x.beginPath(); x.moveTo(lx, y0); x.lineTo(lx, y0 + (y1 - y0) * pl); x.stroke();
+  let act = -1; it.forEach((o, i) => { if (t >= beatT(s, i, 0.1 + i * 0.8 / n) - 0.1) act = i; });
+  if (act >= 0) { // золотая часть линии до активной точки
+    const ya = y0 + stepY * act; x.strokeStyle = GOLD; x.beginPath(); x.moveTo(lx, y0); x.lineTo(lx, ya); x.stroke();
+  }
+  it.forEach((o, i) => {
+    const tb = beatT(s, i, 0.1 + i * 0.8 / n), p = eb(seg(t, tb - 0.1, 0.4)), yy = y0 + stepY * i, on = i === act;
+    x.save(); x.globalAlpha *= 0.35 + 0.65 * cl(p);
+    x.fillStyle = on ? GOLD : p > 0 ? 'rgba(217,180,106,0.5)' : 'rgba(255,255,255,0.2)'; x.beginPath(); x.arc(lx, yy, on ? 14 : 10, 0, 7); x.fill();
+    if (on) { x.strokeStyle = 'rgba(217,180,106,0.35)'; x.lineWidth = 2; x.beginPath(); x.arc(lx, yy, 26 + 6 * Math.sin(t * 5), 0, 7); x.stroke(); }
+    x.globalAlpha = v.a * cl(p) * (on ? 1 : 0.6); x.textAlign = 'left';
+    x.font = '700 30px IN'; x.letterSpacing = '3px'; x.fillStyle = on ? GOLD : MUT; x.fillText(String(o.date || '').toUpperCase(), lx + 50, yy - 14); x.letterSpacing = '0px';
+    x.font = `600 ${fit(o.label || '', 600, 'ID', 46, 760, 26)}px ID`; x.fillStyle = on ? TXT : MUT; x.fillText(o.label || '', lx + 50, yy + 38);
+    x.restore();
+  });
+  x.restore(); source(t, s);
+};
+
+// Карточка новости: источник, дата, заголовок; маркер выделяет главную фразу
+SC.headline = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330);
+  const p = eb(seg(t, s.start + 0.1, 0.55)); const cx = 90, cw = 900;
+  x.font = '600 60px ID'; const lines = wrap(s.text || '', cw - 110).slice(0, 5), lh = 76, ch = 200 + lines.length * lh, cy = 1000 - ch / 2;
+  x.save(); x.translate(W / 2, cy + ch / 2); x.rotate((1 - cl(p)) * -0.05); const k = 0.9 + 0.1 * p; x.scale(k, k); x.translate(-W / 2, -(cy + ch / 2)); x.globalAlpha *= cl(p);
+  x.shadowColor = 'rgba(0,0,0,0.6)'; x.shadowBlur = 60; x.fillStyle = '#121419'; rr(cx, cy, cw, ch, 28); x.fill(); x.shadowBlur = 0; x.strokeStyle = 'rgba(255,255,255,0.08)'; x.lineWidth = 2; x.stroke();
+  // строка источника
+  x.fillStyle = s.tone ? tone(s.tone) : GOLD; x.beginPath(); x.arc(cx + 62, cy + 76, 9, 0, 7); x.fill();
+  x.font = '700 30px IN'; x.textAlign = 'left'; x.fillStyle = TXT; x.fillText(s.source_name || '', cx + 86, cy + 87);
+  if (s.date) { x.font = '500 28px IN'; x.fillStyle = FAINT; x.textAlign = 'right'; x.fillText(s.date, cx + cw - 56, cy + 87); }
+  x.strokeStyle = 'rgba(255,255,255,0.07)'; x.beginPath(); x.moveTo(cx + 56, cy + 128); x.lineTo(cx + cw - 56, cy + 128); x.stroke();
+  // выделение фразы
+  const hl = String(s.highlight || '').toLowerCase(), b1 = beatT(s, 0, 0.5), ph = eio(seg(t, b1, 0.5));
+  x.font = '600 60px ID'; x.textAlign = 'left';
+  lines.forEach((ln, i) => {
+    const yy = cy + 210 + i * lh;
+    if (hl && ph > 0) {
+      const lo = ln.toLowerCase(); let from = -1, to = -1;
+      const words = hl.split(/\s+/).filter(Boolean);
+      for (const w of words) { const j = lo.indexOf(w); if (j >= 0) { from = from < 0 ? j : Math.min(from, j); to = Math.max(to, j + w.length); } }
+      if (from >= 0) { const xa = cx + 56 + x.measureText(ln.slice(0, from)).width, xb = cx + 56 + x.measureText(ln.slice(0, to)).width; x.fillStyle = 'rgba(217,180,106,0.32)'; rr(xa - 8, yy - 56, (xb - xa + 16) * ph, 72, 10); x.fill(); }
+    }
+    x.fillStyle = TXT; x.fillText(ln, cx + 56, yy);
+  });
+  x.restore();
+  x.restore(); source(t, s);
+};
+
+// Список с галочками: за чем следить
+SC.checklist = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 92, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const it = (s.items || []).slice(0, 4), n = it.length, rh = 150, y0 = 990 - (n * rh) / 2 + 40;
+  it.forEach((o, i) => {
+    const tb = beatT(s, i, 0.15 + i * 0.75 / Math.max(1, n)), p = eo(seg(t, tb - 0.15, 0.4)), pc = eio(seg(t, tb, 0.35)); if (p <= 0) return;
+    const yy = y0 + i * rh; x.save(); x.globalAlpha *= p; x.translate((1 - p) * 40, 0);
+    x.fillStyle = 'rgba(18,20,26,0.92)'; rr(110, yy - 56, 860, 112, 20); x.fill();
+    x.strokeStyle = pc > 0 ? GOLD : 'rgba(255,255,255,0.25)'; x.lineWidth = 3; x.beginPath(); x.arc(176, yy, 26, 0, 7); x.stroke();
+    if (pc > 0) { x.strokeStyle = GOLD; x.lineWidth = 5; x.lineCap = 'round'; x.beginPath(); const pts = [[164, yy + 1], [173, yy + 11], [190, yy - 10]]; const L1 = cl(pc * 2), L2 = cl(pc * 2 - 1); x.moveTo(...pts[0]); x.lineTo(pts[0][0] + (pts[1][0] - pts[0][0]) * L1, pts[0][1] + (pts[1][1] - pts[0][1]) * L1); if (L2 > 0) x.lineTo(pts[1][0] + (pts[2][0] - pts[1][0]) * L2, pts[1][1] + (pts[2][1] - pts[1][1]) * L2); x.stroke(); }
+    x.textAlign = 'left'; x.font = `600 ${fit(o, 600, 'ID', 46, 700, 26)}px ID`; x.fillStyle = TXT; x.fillText(o, 232, yy + 16);
+    x.restore();
+  });
+  x.restore(); source(t, s);
+};
+
+// Кольцо с процентом
+SC.ring = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 92, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const cx = W / 2, cy = 960, R = 250, lw = 40, b1 = beatT(s, 0, 0.3), pf = eio(seg(t, b1 - 0.2, 1.2)) * cl((s.pct || 0) / 100), c = tone(s.tone || 'gold'), cR = toneR(s.tone || 'gold');
+  x.lineCap = 'round'; x.lineWidth = lw; x.strokeStyle = 'rgba(255,255,255,0.07)'; x.beginPath(); x.arc(cx, cy, R, 0, 7); x.stroke();
+  if (pf > 0.002) { x.save(); x.shadowColor = `rgba(${cR},.5)`; x.shadowBlur = 30; x.strokeStyle = c; x.beginPath(); x.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pf); x.stroke(); x.restore(); }
+  x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '800 130px ID'; x.letterSpacing = '-3px'; x.fillStyle = TXT; x.fillText(num(pf * 100, (s.pct || 0) % 1 ? 1 : 0) + '%', cx, cy - 10); x.letterSpacing = '0px';
+  x.textBaseline = 'alphabetic';
+  if (s.label) { x.font = `500 ${fit(s.label, 500, 'IN', 36, 420, 20)}px IN`; x.fillStyle = MUT; x.fillText(s.label, cx, cy + 90); }
+  x.restore(); source(t, s);
+};
+
+// Горизонтальные полосы: кто сколько изменился
+SC.bars = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 88, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const it = (s.items || []).slice(0, 5), n = it.length; if (!n) { x.restore(); return; }
+  const mx = Math.max(...it.map(o => Math.abs(o.value || 0)), 1e-9), neg = it.some(o => (o.value || 0) < 0), rh = 130, y0 = 990 - n * rh / 2 + 30;
+  const zx = neg ? W / 2 : 120, maxW = neg ? 380 : 840;
+  if (neg) { x.strokeStyle = 'rgba(255,255,255,0.18)'; x.lineWidth = 2; x.beginPath(); x.moveTo(zx + .5, y0 - 50); x.lineTo(zx + .5, y0 + n * rh - 40); x.stroke(); }
+  it.forEach((o, i) => {
+    const tb = beatT(s, Math.min(i, (s.beats || []).length - 1) >= 0 && i < (s.beats || []).length ? i : 99, 0.12 + i * 0.6 / n), p = eio(seg(t, tb - 0.1, 0.6)); if (p <= 0) return;
+    const yy = y0 + i * rh, val = o.value || 0, w = maxW * Math.abs(val) / mx * p, c = val < 0 ? DOWN : val > 0 ? UP : MUT;
+    x.fillStyle = c; rr(val < 0 ? zx - w : zx, yy - 26, Math.max(2, w), 52, 8); x.fill();
+    x.font = '600 32px IN'; x.fillStyle = TXT; x.textAlign = neg ? (val < 0 ? 'left' : 'right') : 'left';
+    if (neg) x.fillText(o.label || '', val < 0 ? zx + 20 : zx - 20, yy + 11); else x.fillText(o.label || '', 120, yy - 42);
+    x.globalAlpha = v.a * eo(seg(t, tb + 0.3, 0.3)); x.font = '800 36px ID'; x.fillStyle = c; x.textAlign = val < 0 ? 'right' : 'left';
+    x.fillText(o.display || num(val, 1), val < 0 ? zx - w - 16 : zx + w + 16, yy + 13); x.globalAlpha = v.a;
+  });
+  x.restore(); source(t, s);
+};
+
+// Карточки активов: тикер, цена, изменение, мини-график
+SC.ticker = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker, 330); title(s.title, 450, 88, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
+  const it = (s.items || []).slice(0, 3), n = it.length, chh = 230, gap = 36, y0 = 1000 - (n * chh + (n - 1) * gap) / 2 + 40;
+  it.forEach((o, i) => {
+    const tb = beatT(s, i, 0.1 + i * 0.7 / Math.max(1, n)), p = eb(seg(t, tb - 0.15, 0.5)); if (p <= 0) return;
+    const yy = y0 + i * (chh + gap), up = (o.change || 0) >= 0, c = up ? UP : DOWN, cR = up ? RGB.up : RGB.down;
+    x.save(); x.globalAlpha *= cl(p); x.translate((1 - cl(p)) * 80, 0);
+    x.fillStyle = 'rgba(18,20,26,0.95)'; rr(90, yy, 900, chh, 26); x.fill(); x.strokeStyle = 'rgba(255,255,255,0.07)'; x.lineWidth = 2; x.stroke();
+    x.textAlign = 'left'; x.font = '800 58px ID'; x.fillStyle = TXT; x.fillText(o.symbol || '', 136, yy + 84);
+    x.font = '500 28px IN'; x.fillStyle = MUT; x.fillText(o.name || '', 136, yy + 126);
+    x.textAlign = 'right'; x.font = '700 50px ID'; x.fillStyle = TXT; x.fillText(o.price != null ? money(o.price, o.price < 10 ? 2 : 2, '$') : '', 944, yy + 84);
+    const chp = eo(seg(t, tb + 0.15, 0.6)) * (o.change || 0); pill(944 - 70, yy + 128, (chp >= 0 ? '+' : '−') + num(Math.abs(chp), 1) + '%', c, 1, 28);
+    // мини-график по низу карточки
+    const sr = o.series || []; if (sr.length > 2) line(sr, 136, 944, yy + 150, yy + chh - 22, eio(seg(t, tb, 0.9)), cR, 1, false, 3);
+    x.restore();
+  });
+  x.restore(); source(t, s);
+};
+
+// Призыв: кодовое слово в комментарии
+SC.cta = (t, s) => {
+  const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
+  kicker(s.kicker || 'Напиши в комментариях', 640);
+  const word = String(s.title || 'GOLD').toUpperCase(), n = word.length, tA = s.start + 0.35, per = 0.09, typed = Math.max(0, Math.min(n, Math.floor((t - tA) / per) + 1));
+  const p = eb(seg(t, s.start + 0.1, 0.45)); x.save(); x.translate(W / 2, 860); const k = 0.85 + 0.15 * p; x.scale(k, k);
+  x.font = '900 170px ID'; x.letterSpacing = '6px'; const ww = Math.max(420, x.measureText(word).width + 120);
+  x.shadowColor = 'rgba(217,180,106,0.45)'; x.shadowBlur = 60; x.fillStyle = 'rgba(217,180,106,0.12)'; rr(-ww / 2, -140, ww, 200, 40); x.fill(); x.shadowBlur = 0;
+  x.strokeStyle = 'rgba(217,180,106,0.7)'; x.lineWidth = 3; x.stroke();
+  x.fillStyle = GOLD_HI; x.textAlign = 'center'; x.fillText(word.slice(0, t >= tA ? typed : 0), 0, 18); x.letterSpacing = '0px';
+  if (t < tA + n * per + 0.4 && Math.floor(t * 2.4) % 2 === 0) { const tw = x.measureText(word.slice(0, typed)).width; x.fillStyle = GOLD; x.fillRect(tw / 2 + 12, -100, 8, 130); }
+  x.restore();
+  if (s.cta) { const pc = eo(seg(t, tA + n * per + 0.1, 0.4)); x.save(); x.globalAlpha *= pc; x.font = `500 ${fit(s.cta, 500, 'IN', 44, 900)}px IN`; x.fillStyle = TXT; x.textAlign = 'center'; x.fillText(s.cta, W / 2, 1100 + (1 - pc) * 20); x.restore(); }
+  x.restore();
+};
+
+// ---------- Общие рисовалки ----------
+function synth(dir, n, seed) { const out = []; let v = 0, s_ = seed; const R = () => ((s_ = (s_ * 1664525 + 1013904223) >>> 0) / 4294967296); for (let i = 0; i < n; i++) { v += dir * 0.5 + (R() - 0.5) * 3; out.push(v); } return out; }
+function line(pts, x0, x1, y0, y1, pr, rgb, al = 1, fill = false, lw = 4) {
+  if (pr <= 0 || pts.length < 2) return; const mn = Math.min(...pts), mx = Math.max(...pts), n = pts.length;
+  const X = i => x0 + i / (n - 1) * (x1 - x0), Y = p => y1 - (p - mn) / (mx - mn || 1) * (y1 - y0), m = Math.max(1, (n - 1) * pr);
+  x.save(); x.globalAlpha *= al; x.beginPath();
+  for (let i = 0; i <= Math.floor(m); i++) i ? x.lineTo(X(i), Y(pts[i])) : x.moveTo(X(i), Y(pts[i]));
+  const fi = Math.floor(m), fr = m - fi; if (fi < n - 1 && fr > 0) x.lineTo(X(fi + fr), Y(pts[fi] + (pts[fi + 1] - pts[fi]) * fr));
+  x.strokeStyle = `rgba(${rgb},1)`; x.lineWidth = lw; x.lineJoin = 'round'; x.shadowColor = `rgba(${rgb},.5)`; x.shadowBlur = 16; x.stroke(); x.shadowBlur = 0;
+  if (fill) { x.lineTo(X(fi + fr), y1); x.lineTo(X(0), y1); x.closePath(); const g = x.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, `rgba(${rgb},0.18)`); g.addColorStop(1, `rgba(${rgb},0)`); x.fillStyle = g; x.fill(); }
+  x.restore();
+}
+
+// ---------- Субтитры: слова появляются в такт голосу, ключевое — золотом ----------
+const LEAD = 0.04;
+function subs(t) {
+  if (t >= OUT) return;
+  const S = J.subs || [];
+  for (let si = 0; si < S.length; si++) {
+    const s = S[si], st = s.w[0][1] - LEAD, nx = S[si + 1], lastW = s.w.at(-1)[1];
+    const end = nx && nx.w[0][1] - lastW < 1.4 ? nx.w[0][1] - LEAD : lastW + 0.7;
+    if (t < st || t >= end) continue;
+    x.textBaseline = 'middle'; x.font = '700 50px IN';
+    const sp = 14, maxW = 860, rows = [[]]; let w = 0;
+    s.w.forEach(([wd], i) => { x.font = `${i === s.key ? 800 : 700} 50px IN`; const ww = x.measureText(wd).width; if (w + ww > maxW && rows.at(-1).length) { rows.push([]); w = 0; } rows.at(-1).push({ wd, i, ww }); w += ww + sp; });
+    rows.forEach((r, ri) => {
+      const rw = r.reduce((q, o) => q + o.ww, 0) + sp * (r.length - 1); let cx = W / 2 - rw / 2; const cy = 1530 + ri * 66;
+      for (const o of r) {
+        const p = eo(seg(t, s.w[o.i][1] - LEAD, 0.14)); if (p <= 0) { cx += o.ww + sp; continue; }
+        x.save(); x.globalAlpha = cl(p * 1.4); x.translate(cx + o.ww / 2, cy + (1 - p) * 10);
+        x.font = `${o.i === s.key ? 800 : 700} 50px IN`; x.fillStyle = o.i === s.key ? GOLD : TXT; x.shadowColor = 'rgba(0,0,0,0.8)'; x.shadowBlur = 14; x.textAlign = 'center'; x.fillText(o.wd, 0, 2); x.restore();
+        cx += o.ww + sp;
+      }
+    });
+    x.textBaseline = 'alphabetic';
+  }
+}
+
+// ---------- Утверждённая концовка (без изменений) ----------
+function logo(cx, cy, s) {
+  x.save(); x.translate(cx - 152 * s, cy - 152 * s); x.scale(s, s); x.translate(-104, -112);
+  x.strokeStyle = '#B8913F'; x.lineWidth = 18; x.lineCap = 'round'; x.beginPath(); x.moveTo(150, 168); x.lineTo(362, 168); x.moveTo(256, 168); x.lineTo(256, 362); x.moveTo(150, 168); x.lineTo(256, 266); x.moveTo(362, 168); x.lineTo(256, 266); x.stroke();
+  const gr = x.createRadialGradient(220, 210, 10, 256, 266, 230); gr.addColorStop(0, GOLD_HI); gr.addColorStop(0.55, GOLD); gr.addColorStop(1, GOLD_LO); x.fillStyle = gr;
+  [[150, 168, 32], [362, 168, 32], [256, 168, 22], [256, 266, 22], [256, 362, 38]].forEach(([px, py, r]) => { x.beginPath(); x.arc(px, py, r, 0, 7); x.fill(); });
+  x.restore();
+}
+function wordmark(cx, cy, s) {
+  x.save(); x.translate(cx - 338 * s, cy - 99 * s); x.scale(s, s); x.translate(14, 12);
+  x.strokeStyle = '#EFE3C4'; x.lineWidth = 26; x.lineJoin = 'miter'; x.lineCap = 'butt';
+  x.beginPath(); x.moveTo(0, 13); x.lineTo(150, 13); x.moveTo(75, 13); x.lineTo(75, 196); x.stroke();
+  x.beginPath(); x.moveTo(222, 196); x.lineTo(222, 13); x.lineTo(300, 13); x.arc(300, 65, 52, -Math.PI / 2, Math.PI / 2); x.lineTo(222, 117); x.moveTo(292, 117); x.lineTo(354, 196); x.stroke();
+  x.beginPath(); x.moveTo(420, 196); x.lineTo(492, 13); x.lineTo(498, 13); x.lineTo(570, 196); x.moveTo(448, 132); x.lineTo(542, 132); x.stroke();
+  x.beginPath(); x.moveTo(652, 52); x.lineTo(652, 196); x.stroke();
+  const gr = x.createRadialGradient(645, 8, 2, 652, 15, 26); gr.addColorStop(0, GOLD_HI); gr.addColorStop(0.55, GOLD); gr.addColorStop(1, GOLD_LO); x.fillStyle = gr; x.beginPath(); x.arc(652, 15, 22, 0, 7); x.fill();
+  x.restore();
+}
+function sceneOutro(t) {
+  const a = OUT; if (t < a) return;
+  const url = 'trai-agent.com', typeA = a + 0.1, per = 0.06, typed = Math.max(0, Math.min(url.length, Math.floor((t - typeA) / per) + 1));
+  const press = typeA + url.length * per + 0.08, pin = eb(seg(t, a, 0.22)), shrink = eo(seg(t, press, 0.25));
+  const bw = 900 - shrink * 340, bh = 130 - shrink * 30, by = 900 - shrink * 30, barA = cl(pin) * (1 - eo(seg(t, press + 0.1, 0.22)));
+  if (barA > 0) {
+    x.save(); x.globalAlpha = barA; x.translate(W / 2, by); x.scale(0.9 + 0.1 * cl(pin), 0.9 + 0.1 * cl(pin));
+    x.shadowColor = 'rgba(217,180,106,0.35)'; x.shadowBlur = 50; x.fillStyle = 'rgba(22,24,30,0.98)'; rr(-bw / 2, -bh / 2, bw, bh, bh / 2); x.fill(); x.shadowBlur = 0;
+    x.strokeStyle = 'rgba(217,180,106,0.45)'; x.lineWidth = 3; x.stroke();
+    x.strokeStyle = MUTED; x.lineWidth = 6; x.beginPath(); x.arc(-bw / 2 + 70, -6, 20, 0, 7); x.stroke(); x.beginPath(); x.moveTo(-bw / 2 + 84, 8); x.lineTo(-bw / 2 + 100, 24); x.stroke();
+    x.font = '700 60px IN'; x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = TXT; const s = url.slice(0, t >= typeA ? typed : 0);
+    x.fillText(s, -bw / 2 + 130, 2);
+    const blink = Math.floor(t * 2.2) % 2 === 0 || (t > typeA && t < press);
+    if (blink && t < press) { const cw = x.measureText(s).width; x.fillStyle = GOLD; x.fillRect(-bw / 2 + 136 + cw, -34, 6, 68); }
+    x.restore(); x.textBaseline = 'alphabetic';
+  }
+  const lp = eb(seg(t, press + 0.12, 0.38));
+  if (lp > 0) {
+    x.save(); x.globalAlpha = cl(lp);
+    const glow = x.createRadialGradient(W / 2, 800, 10, W / 2, 800, 520); glow.addColorStop(0, `rgba(217,180,106,${0.22 * cl(lp)})`); glow.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = glow; x.fillRect(0, 300, W, 1000);
+    logo(W / 2, 760 - (1 - cl(lp)) * 30, 0.85 * (0.85 + 0.15 * lp)); wordmark(W / 2, 1000, 0.62); x.restore();
+    const tp = eo(seg(t, press + 0.32, 0.25)), tag = J.tagline || 'ИИ-агенты для торговли золотом';
+    x.save(); x.globalAlpha = tp; x.textAlign = 'center'; const ts = fit(tag, 600, 'IN', 40, 960); x.font = `600 ${ts}px IN`; x.fillStyle = TXT; x.fillText(tag, W / 2, 1160);
+    x.font = '700 44px IN'; x.fillStyle = GOLD; x.fillText('trai-agent.com', W / 2, 1240); x.restore();
+  }
+}
+
+// ---------- Кадр ----------
+// «Удары»: на каждом ударе сцены — лёгкий толчок камеры и вспышка света
+const ALLB = J.scenes.flatMap(s => s.beats || []).concat((J.beats || []));
+const kick = t => { let v = 0; for (const b of ALLB) { const d = t - b + 0.02; if (d >= 0 && d < 0.4) v = Math.max(v, Math.exp(-d * 10)); } return v; };
+window.render = t => {
+  bg(t);
+  const kb = kick(t);
+  if (kb > 0.01 && t < OUT) { const g = x.createRadialGradient(W / 2, 960, 20, W / 2, 960, 760); g.addColorStop(0, `rgba(217,180,106,${0.07 * kb})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 240, W, 1300); }
+  for (const s of J.scenes) if (t >= s.start && t <= s.end + 0.001) {
+    // медленный наезд камеры (+3%) и толчок на ударе
+    const k = 1 + 0.03 * seg(t, s.start, s.end - s.start) + 0.012 * kb;
+    x.save(); x.translate(W / 2, 980); x.scale(k, k); x.translate(-W / 2, -980); (SC[s.type] || SC.counter)(t, s); x.restore();
+  }
+  header(t); sceneOutro(t); subs(t);
+  const f = seg(t, TOTAL - 0.22, 0.22); if (f > 0) { x.fillStyle = `rgba(0,0,0,${f})`; x.fillRect(0, 0, W, H); }
+};
+window.ready = document.fonts.ready.then(() => Promise.all(['900 100px ID', '800 40px ID', '700 40px ID', '600 40px ID', '300 40px ID', '800 40px IN', '700 40px IN', '600 40px IN', '500 40px IN'].map(f => document.fonts.load(f))));
+</script></body></html>

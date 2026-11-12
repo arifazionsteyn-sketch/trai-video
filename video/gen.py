@@ -1,7 +1,8 @@
-# TRAI — автоматические ролики про золото: тема и факты (Gemini с поиском Google) → сценарий на RU/EN/UZ →
-# озвучка Azure (время каждого слова для субтитров) → кадры (scene.html) → эффекты → сведение → Telegram.
-#   python3 video/gen.py --count 3 --langs ru,en,uz
-#   python3 video/gen.py --mock          — без сети: проверочный сценарий и тишина вместо голоса
+# TRAI — автоматические ролики: история рынка за неделю или тема про золото (Gemini с поиском Google) → сценарий RU/EN/UZ →
+# голос Gemini (время слов — Whisper) → кадры (scene2.html для историй, scene.html для золота) → эффекты → сведение → Telegram.
+#   python3 video/gen.py --count 2 --langs ru,en,uz            — истории рынка (по умолчанию --mode story)
+#   python3 video/gen.py --mode gold --formats levels          — старые темы про золото
+#   python3 video/gen.py --mock [--mode gold]                  — без сети: проверочный сценарий и тишина вместо голоса
 # Ключи берутся из переменных окружения: GEMINI_SCRIPT_KEY, AZURE_SPEECH_KEY, AZURE_SPEECH_REGION, TG_BOT_TOKEN, TG_REVIEW_CHAT.
 import argparse, datetime, json, os, re, subprocess, sys, time, urllib.parse, urllib.request, wave
 import numpy as np
@@ -14,6 +15,7 @@ LANGS_ALL = ['ru', 'en', 'uz']
 VOICES = {'ru': os.environ.get('VOICE_RU', 'ru-RU-DmitryNeural'), 'en': os.environ.get('VOICE_EN', 'en-US-AndrewNeural'), 'uz': os.environ.get('VOICE_UZ', 'uz-UZ-SardorNeural')}
 RATE = os.environ.get('VOICE_RATE', '+6%')
 DISCLAIMER = {'ru': 'Не является финансовой рекомендацией', 'en': 'Not financial advice', 'uz': 'Moliyaviy maslahat emas'}
+DISCLAIMER_SHORT = {'ru': 'Не финансовый совет', 'en': 'Not financial advice', 'uz': 'Moliyaviy maslahat emas'}
 TAGLINE = {'ru': 'ИИ-агенты для торговли золотом', 'en': 'AI agents for gold trading', 'uz': 'Oltin savdosi uchun AI agentlar'}
 FORMATS = {
     'levels': 'карта рынка золота на сегодня по данным TRAI: где скопилась ликвидность (стопы толпы выше и ниже цены), ключевые уровни поддержки и сопротивления, VWAP, дневной диапазон ATR — куда цене логичнее сходить и почему; конкретные цены',
@@ -341,9 +343,9 @@ def tts_eleven(text, lang, path):
 # ---------- Озвучка Gemini TTS (бесплатный ключ): весь текст одним куском, выразительно; время слов — Whisper ----------
 TTS_MODELS = [m for m in (os.environ.get('TTS_MODELS') or 'gemini-3.8-flash-lite-tts,gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts').split(',') if m]
 STYLE = {
-    'ru': 'Ты диктор. Говори по-русски низким, мужественным, спокойным и ровным голосом — как опытный трейдер, который никуда не спешит и уверен в своих словах. Без восторга и без напора, не повышай голос, не тараторь: размеренный темп, чуть медленнее обычной речи. Очень чёткая дикция: каждое слово и каждую цифру произноси ясно. После важной цифры — короткая пауза. Без пауз в начале, между строками пауза. Читай ТОЛЬКО текст пользователя, ничего не добавляй.',
-    'en': 'You are a narrator. Speak English in a low, masculine, calm but charismatic and confident voice — like an experienced trader. Calm, confident pace, never rushed; brief pause after key numbers. No pause at the start, pauses between lines. Read ONLY the user text, add nothing.',
-    'uz': "Siz diktorsiz. O'zbek tilida past, erkakcha, xotirjam, lekin xarizmatik va ishonchli ovozda gapiring — tajribali treyder kabi. Xotirjam, shoshilmasdan; muhim raqamdan keyin qisqa pauza. Boshida pauza yo'q, satrlar orasida pauza. FAQAT foydalanuvchi matnini o'qing, hech narsa qo'shmang.",
+    'ru': 'Ты рассказчик популярного канала о рынках. Говори по-русски низким, мужественным, уверенным голосом — спокойно, но живо, как будто рассказываешь другу интересную историю: с интонацией, без монотонности и без крика. Первую фразу — с лёгким напряжением, чтобы зацепить. Перед главной цифрой и на тире — короткая пауза, саму цифру — чуть выделить. Темп ровный, не тараторь. Очень чёткая дикция: каждое слово и каждую цифру произноси полностью, с первого звука. Между строками — пауза. Читай ТОЛЬКО текст пользователя, ничего не добавляй.',
+    'en': 'You are the narrator of a popular markets channel. Speak English in a low, masculine, confident voice — calm but alive, like telling a friend a gripping story: natural intonation, never monotone, never shouting. Give the first line a touch of tension to hook the listener. Brief pause before key numbers and at dashes, and lean slightly on the number itself. Steady pace, never rushed. Crisp diction: pronounce every word fully from its first sound. Pause between lines. Read ONLY the user text, add nothing.',
+    'uz': "Siz bozorlar haqidagi mashhur kanal hikoyachisisiz. O'zbek tilida past, erkakcha, ishonchli ovozda gapiring — xotirjam, lekin jonli, do'stingizga qiziqarli voqeani aytib berayotgandek: intonatsiya bilan, bir xil ohangda emas. Birinchi gapni biroz taranglik bilan ayting. Muhim raqamdan oldin va tire belgisida qisqa pauza qiling. Shoshilmang. Har bir so'zni birinchi tovushidan boshlab aniq talaffuz qiling. Satrlar orasida pauza. FAQAT foydalanuvchi matnini o'qing, hech narsa qo'shmang.",
 }
 
 
@@ -452,15 +454,33 @@ def read_wav(path):
     return a
 
 
-def trim(a):
-    # тишина в начале и в конце фразы Azure — убираем, чтобы сцены шли плотно
-    idx = np.where(np.abs(a) > 0.01)[0]
+def trim(a, pre=0.18, post=0.12):
+    # тишина в начале и в конце — убираем, но с запасом: тихие первые звуки («с», «ф», «х», «п») не должны срезаться
+    if not len(a): return a, 0.0
+    pk = float(np.abs(a).max())
+    if pk <= 0: return a, 0.0
+    env = np.convolve(np.abs(a), np.ones(240) / 240, 'same')  # огибающая 5 мс
+    idx = np.where(env > max(0.003, pk * 0.02))[0]
     if not len(idx): return a, 0.0
-    i0 = max(0, idx[0] - int(0.03 * SR)); i1 = min(len(a), idx[-1] + int(0.08 * SR))
-    return a[i0:i1], i0 / SR
+    i0 = max(0, idx[0] - int(pre * SR)); i1 = min(len(a), idx[-1] + int(post * SR))
+    b = a[i0:i1].copy(); n = min(len(b), int(0.01 * SR)); b[:n] *= np.linspace(0, 1, n)  # мягкое начало только по тишине перед речью
+    return b, i0 / SR
 
 
 norm = lambda s: re.sub(r'[^\w%$]+', '', s.lower().replace('ё', 'е'))
+
+
+def safe_cut(a, first, heard):
+    # Модель иногда читает лишнее перед текстом. Режем, только если Whisper услышал слова раньше первого слова сценария
+    # и между ними есть тишина; режем в самой тихой точке, а не «за 0,12 с до слова» (так раньше срезался первый слог).
+    if first < 0.6 or not any(st < first - 0.4 for _, st in heard): return 0.0
+    lo, hi = int(max(0.0, first - 0.9) * SR), int(max(0.0, first - 0.08) * SR)
+    seg_ = a[lo:hi]
+    if len(seg_) < 1200: return 0.0
+    e = np.sqrt(np.convolve(seg_ ** 2, np.ones(960) / 960, 'valid')); k = int(np.argmin(e))
+    speech = a[int(first * SR):int((first + 1.5) * SR)]
+    if not len(speech) or e[k] > 0.25 * float(np.sqrt(np.mean(speech ** 2)) + 1e-9): return 0.0  # тишины нет — не трогаем
+    return (lo + k + 480) / SR
 
 
 def words_of(say):
@@ -601,6 +621,295 @@ def scene_data(s, L, work=None):
     return d
 
 
+# ================= Истории рынка (v2): любой рынок за неделю, история с началом и концом, сцены scene2.html =================
+CATS = {'crypto': 'криптовалюты (биткоин, эфир, крипто-компании, биржевые фонды на крипту)',
+        'stocks': 'акции компаний (резкие движения из-за отчётов, скандалов, сделок, смены CEO, ИИ, судов)',
+        'commodities': 'сырьё (нефть, газ, серебро, медь, золото, зерно)',
+        'macro': 'макро и индексы (ФРС, инфляция, рынок труда, облигации, S&P 500, Nasdaq)',
+        'fx': 'валюты (доллар, евро, иена, юань)'}
+CAT_ORDER = ['stocks', 'crypto', 'commodities', 'stocks', 'macro', 'crypto', 'fx', 'commodities']
+
+
+def story_brief():
+    # заголовки за неделю — подсказка, о чём сейчас говорит рынок (сами факты модель берёт из поиска Google)
+    out = []
+    for q, hl in (('stock plunges OR soars OR tumbles when:7d', 'en-US&gl=US&ceid=US:en'), ('shares CEO OR earnings OR lawsuit when:7d', 'en-US&gl=US&ceid=US:en'),
+                  ('bitcoin OR crypto OR ether when:7d', 'en-US&gl=US&ceid=US:en'), ('oil OR silver OR copper OR gold prices when:7d', 'en-US&gl=US&ceid=US:en'),
+                  ('Fed OR inflation OR "jobs report" OR treasury yields when:7d', 'en-US&gl=US&ceid=US:en'), ('акции рухнули OR взлетели when:7d', 'ru&gl=RU&ceid=RU:ru')):
+        items = rss('https://news.google.com/rss/search?q=' + urllib.parse.quote(q) + '&hl=' + hl, 12)
+        if items: out.append(f'— Google News «{q}»:\n' + '\n'.join(items))
+    return '\n\n'.join(out)
+
+
+def research_story(hist, avoid_cats):
+    today = datetime.date.today().isoformat()
+    recent = [f"{h.get('topic')} [{h.get('asset', '')}]" for h in hist[-30:]]
+    cats = [c for c in CATS if c not in avoid_cats] or list(CATS)
+    prompt = (f'Сегодня {today}. Найди поиском Google самые обсуждаемые истории на финансовых рынках за последние 7 дней и выбери ОДНУ — '
+              'для короткого вертикального ролика (45 секунд). Нужна история с сильным крючком, точными цифрами и понятной цепочкой «что случилось → почему → что дальше»: '
+              'резкий обвал или взлёт акции (отчёт, скандал, смена CEO, сделка, суд), движение биткоина или крипто-компаний, нефть, серебро, решения ФРС, инфляция, валюты.\n'
+              f'Категория — одна из: {"; ".join(f"{c} — {CATS[c]}" for c in cats)}.\n'
+              f'Не повторяй истории и активы прошлых роликов: {"; ".join(recent) or "—"}.\n\n'
+              'Заголовки последней недели (для ориентира, факты проверь поиском):\n' + (story_brief() or '(нет)') + '\n\n'
+              'Ответь по-русски строго по пунктам:\n'
+              '1) КАТЕГОРИЯ: одно слово из списка (crypto, stocks, commodities, macro, fx)\n'
+              '2) АКТИВ: название и тикер Yahoo Finance (например NVDA, TSLA, BTC-USD, ETH-USD, CL=F, BZ=F, GC=F, SI=F, HG=F, EURUSD=X, JPY=X, ^GSPC, ^IXIC, DX-Y.NYB); '
+              'до 3 связанных тикеров, если они помогают истории\n'
+              '3) ИСТОРИЯ: заголовок одной строкой\n'
+              '4) ДАТЫ: дата главного события (ГГГГ-ММ-ДД) и других важных моментов\n'
+              '5) ФАКТЫ: 8–12 фактов с точными цифрами (цены, проценты, суммы) и датами; у каждого — издание-источник\n'
+              '6) ЦЕПОЧКА: почему это случилось — 2–4 звена «причина → следствие», только из фактов\n'
+              '7) ПОВОРОТ: неочевидная деталь, которую большинство упускает (подтверждённая фактами)\n'
+              '8) ЧТО ДАЛЬШЕ: ближайшие даты, события и уровни цены, за которыми следит рынок\n'
+              'Правила: только проверенные факты из найденных источников; о людях и компаниях — только то, что сообщили издания, с указанием издания; '
+              'никого не называй виновным; если цифру не нашёл — не пиши её.')
+    body = {'contents': [{'role': 'user', 'parts': [{'text': prompt}]}], 'tools': [{'google_search': {}}], 'generationConfig': {'temperature': 0.8, 'maxOutputTokens': 8000}}
+    try: txt, cand, model = gemini(body)
+    except Exception as e:
+        log('поиск Google не сработал:', e); body.pop('tools'); txt, cand, model = gemini(body); model += ' (без поиска — проверь цифры!)'
+    src = []
+    for ch in ((cand.get('groundingMetadata') or {}).get('groundingChunks') or []):
+        w = ch.get('web') or {}
+        if w.get('title') and w.get('title') not in src: src.append(w['title'])
+    m = re.search(r'КАТЕГОРИЯ:\s*\**\s*([a-z]+)', txt)
+    return txt, src[:8], model, (m.group(1) if m and m.group(1) in CATS else '')
+
+
+TONE = {'type': 'STRING', 'enum': ['up', 'down', 'gold', 'blue']}
+NUM = {'type': 'NUMBER'}
+LT2 = {'type': 'OBJECT', 'properties': {
+    'say': TXT(), 'kicker': TXT(), 'title': TXT(), 'accent': TXT(), 'label': TXT(), 'prefix': TXT(), 'suffix': TXT(), 'source': TXT(), 'mark_label': TXT(),
+    'badge': TXT(), 'a_label': TXT(), 'a_display': TXT(), 'b_label': TXT(), 'b_display': TXT(), 'date': TXT(), 'text': TXT(), 'highlight': TXT(), 'cta': TXT(),
+    'level_labels': {'type': 'ARRAY', 'items': TXT()}, 'names': {'type': 'ARRAY', 'items': TXT()}, 'list': {'type': 'ARRAY', 'items': TXT()},
+    'items': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'properties': {'label': TXT(), 'sub': TXT(), 'display': TXT(), 'date': TXT()}}},
+    'beats': {'type': 'ARRAY', 'items': TXT()}, 'keys': {'type': 'ARRAY', 'items': TXT()}},
+    'required': ['say', 'beats']}
+SCHEMA2 = {'type': 'OBJECT', 'required': ['topic', 'category', 'asset', 'scenes', 'post'], 'properties': {
+    'topic': TXT(), 'category': {'type': 'STRING', 'enum': list(CATS)}, 'asset': TXT(),
+    'post': {'type': 'OBJECT', 'properties': {l: {'type': 'OBJECT', 'properties': {'caption': TXT(), 'hashtags': TXT()}} for l in LANGS_ALL}},
+    'scenes': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'required': ['type', 'ru', 'en', 'uz'], 'properties': {
+        'type': {'type': 'STRING', 'enum': ['hook', 'candles', 'headline', 'chain', 'counter', 'versus', 'grid', 'ring', 'bars', 'timeline', 'ticker', 'checklist', 'cta']},
+        'symbol': TXT(), 'range': {'type': 'STRING', 'enum': ['5d', '1mo', '3mo', '6mo', '1y']}, 'interval': {'type': 'STRING', 'enum': ['1h', '1d', '1wk']},
+        'mark_date': TXT(), 'levels': {'type': 'ARRAY', 'items': NUM}, 'level_tones': {'type': 'ARRAY', 'items': TONE},
+        'value': NUM, 'from': NUM, 'decimals': {'type': 'INTEGER'}, 'tone': TONE, 'dir': {'type': 'STRING', 'enum': ['up', 'down', 'none']},
+        'a_value': NUM, 'b_value': NUM, 'a_tone': TONE, 'b_tone': TONE, 'total': {'type': 'INTEGER'}, 'count': {'type': 'INTEGER'}, 'pct': NUM,
+        'values': {'type': 'ARRAY', 'items': NUM}, 'symbols': {'type': 'ARRAY', 'items': TXT()}, 'source_name': TXT(), 'ref_value': NUM,
+        'ru': LT2, 'en': LT2, 'uz': LT2}}}}}
+
+RULES2 = '''Ты сценарист и режиссёр коротких вертикальных роликов (Shorts, Reels, TikTok) аккаунта TRAI о рынках.
+Стиль — строгий, «данные на экране»: тёмный фон, настоящие графики, крупные числа, без персонажей. Каждый ролик — законченная ИСТОРИЯ с началом и концом.
+
+СТРУКТУРА (7–9 сцен, 40–50 секунд):
+1. hook — крючок за 2–3 секунды: самое сильное число или факт. Утверждение, от которого хочется досмотреть (не «знаете ли вы»).
+2. Что случилось — candles (настоящий график актива с отметкой события) и/или headline (новость: издание, дата, суть своими словами).
+3–5. Почему — chain (2–4 звена «причина → следствие»), counter / versus / bars / grid / ring / timeline с ключевыми цифрами.
+6. Поворот — то, что большинство упускает (неочевидная деталь, уровень, сравнение с прошлым), начинай с «Но…» / «А вот…».
+7. Что дальше — checklist (2–3 конкретных сигнала: даты, уровни, события) или timeline.
+8. cta — призыв написать кодовое слово в комментариях.
+Каждая сцена отвечает на вопрос, который оставила предыдущая: «что → почему → но → что дальше». Без повторов одной мысли.
+Подряд не ставь два одинаковых типа сцен. candles — 1–2 раза, chain — 1 раз.
+
+СЦЕНЫ И ИХ ДАННЫЕ (поля сцены — общие для всех языков, тексты — в ru/en/uz):
+- hook: value (главное число, необязательно), from (было, если число «было → стало»), decimals, dir (up/down/none), symbol (тикер для фоновой линии);
+  тексты: kicker, title, accent, label (подпись под числом), prefix/suffix числа («$», «%», « млрд $»).
+- candles: symbol (тикер Yahoo Finance), range (5d/1mo/3mo/6mo/1y), interval (1h для 5d, 1d для 1mo–6mo, 1wk для 1y), mark_date (ГГГГ-ММ-ДД события),
+  levels (до 3 цен), level_tones (up — поддержка, down — сопротивление, gold — важный уровень, blue — средняя/ориентир);
+  тексты: kicker, mark_label (2–3 слова: «отчёт», «отставка CEO»), level_labels, source. Свечи и процент изменения подставятся сами из реальных данных.
+- headline: source_name (издание), tone; тексты: date («9 ноя»), text (суть новости своими словами, до 14 слов, не копируй заголовок), highlight (2–4 слова из text для маркера).
+- chain: тексты items — 2–4 звена {label (до 22 символов), sub (цифра/уточнение до 34 символов)}.
+- counter: value, from (необязательно — «было → стало» с перечёркиванием), decimals, tone, ref_value (необязательно — текущая цена, если value — уровень: покажем шкалу «сейчас → уровень»);
+  тексты: kicker, title, accent, label, prefix, suffix, source.
+- versus: a_value, b_value, a_tone, b_tone; тексты: kicker, title, accent, a_label, a_display, b_label, b_display, badge («×3», «−40%»).
+- grid: total (4–20), count (сколько из них выделить), tone; тексты: kicker, title, accent, label. Для «7 из 10», «5 недель подряд».
+- ring: pct (0–100), tone; тексты: kicker, title, accent, label.
+- bars: values (2–5 чисел, можно отрицательные — изменение в %); тексты: kicker, title, items [{label, display}].
+- timeline: тексты: kicker, title, items 3–5 [{date, label (до 30 символов)}].
+- ticker: symbols (2–3 тикера Yahoo), range; тексты: kicker, title, names (короткие названия). Цены и изменения подставятся сами.
+- checklist: тексты: kicker, title, list (2–3 пункта до 32 символов).
+- cta: тексты: title — одно кодовое слово латиницей заглавными, одинаковое во всех языках (тикер или тема: BTC, NVDA, OIL, FED);
+  kicker «Напиши в комментариях»; cta «пришлю разбор и уровни»; say «Напиши в комментариях NVDA — пришлю разбор.» (на нужном языке).
+
+ТЕКСТЫ (ru, en, uz — узбекский латиницей, современный):
+- say — что говорит диктор: 1–2 коротких предложения, 8–20 слов. Весь текст: русский 85–110 слов, английский 80–105, узбекский 70–90.
+  Живо, разговорно, как рассказчик популярного канала о рынках: интрига в начале, перед главной цифрой и поворотом — тире «—» (пауза).
+  Числа цифрами, проценты можно «12%». НЕ используй значок $ и сокращения (млн, млрд, тыс.) — пиши «75 тысяч долларов», «1,3 миллиарда долларов».
+- beats — 1–3 слова ИЗ say этой сцены (точно как в тексте, по одному слову), на которых меняется картинка: chain — по слову на каждое звено,
+  checklist и timeline — на каждый пункт, candles — 2 (событие, уровни), counter/versus/grid/ring — 1–2 (на главной цифре).
+- keys — 1–2 слова из say для золотой подсветки в субтитрах.
+- kicker — до 30 символов; title — до 16 символов в строке, до 2 строк через \\n; accent — 1–2 слова из title для выделения золотом.
+- source — откуда цифры сцены, коротко («Reuters, 9 ноя», «данные Yahoo Finance»).
+- Все надписи — на языке ролика. Переводы не дословные, естественно для носителя, те же цифры.
+
+ФАКТЫ И ТОН:
+- Только цифры и факты из исследования ниже, ничего не выдумывай. Даты и цены — точно как в фактах.
+- О компаниях и людях — только то, что сообщили издания, со ссылкой («по данным Reuters», «сообщает Bloomberg»). Никого не называй виновным, без оценок и слухов.
+- Политика — нейтрально, только влияние на рынок.
+- Не финансовый совет: без «покупайте/продавайте», говори «сценарий», «уровень», «за чем следить».
+- Без поучений и шаблонов: никаких «друзья», «давайте разберём», «важно понимать», «запомните», «подписывайтесь».
+topic — заголовок ролика по-русски; category и asset (главный тикер) — из исследования.
+post — подпись для соцсетей на каждом языке (2–3 предложения + призыв зайти в бота @trai_agent_bot, без хэштегов) и hashtags (5–8 штук).'''
+
+
+def make_script_story(facts):
+    msg = RULES2 + '\n\nИССЛЕДОВАНИЕ:\n' + facts
+    gc = {'temperature': 0.8, 'maxOutputTokens': 20000, 'responseMimeType': 'application/json'}
+    parse = lambda t: json.loads(t.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
+    try: txt, _, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
+    except Exception as e:
+        log('схема не принята:', e)
+        txt, _, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg + '\n\nОтветь JSON строго по этой схеме:\n' + json.dumps(SCHEMA2, ensure_ascii=False)}]}], 'generationConfig': gc}, timeout=240)
+    sc = parse(txt)
+    if len(sc.get('scenes') or []) < 5: raise RuntimeError('слишком короткий сценарий')
+    for _ in range(2):  # длина: 40–50 секунд речи
+        wl = [len((x.get('ru') or {}).get('say', '').split()) for x in sc['scenes']]
+        if sum(wl) <= 118 and max(wl) <= 24: break
+        log(f'сценарий длинный ({sum(wl)} слов, самая длинная фраза {max(wl)}) — сокращаю')
+        msg2 = ('Сократи этот сценарий: каждая фраза say — 8–20 слов, весь русский текст 85–110 слов (английский и узбекский — так же коротко). '
+                'Сохрани историю, цифры, интригу, типы сцен и все остальные поля; beats и keys должны остаться словами из нового say. Верни тот же JSON.\n\n' + json.dumps(sc, ensure_ascii=False))
+        try:
+            t2, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg2}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
+            sc2 = parse(t2)
+            if len(sc2.get('scenes') or []) >= 5: sc = sc2
+        except Exception as e: log('сократить не вышло:', e); break
+    sc['v'] = 2
+    return sc, model
+
+
+# ---------- Котировки: Yahoo Finance (без ключа) → Gate (крипта) → Stooq ----------
+QUOTES = {}
+UA = {'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
+RANGE_DAYS = {'5d': 5, '1mo': 31, '3mo': 92, '6mo': 183, '1y': 366}
+STOOQ = {'GC=F': 'gc.f', 'SI=F': 'si.f', 'CL=F': 'cl.f', 'BZ=F': 'cb.f', 'HG=F': 'hg.f', 'NG=F': 'ng.f', '^GSPC': '^spx', '^IXIC': '^ndq', '^DJI': '^dji', 'DX-Y.NYB': 'dx.f'}
+
+
+def quotes(sym, rng='1mo', interval='1d'):
+    k = (sym, rng, interval)
+    if k in QUOTES: return QUOTES[k]
+    out = None
+    for host in ('query1', 'query2'):
+        try:
+            u = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}?range={rng}&interval={interval}&includePrePost=false'
+            with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=20) as r: res = json.load(r)['chart']['result'][0]
+            q = res['indicators']['quote'][0]
+            bars = [[t, o, h, l, c] for t, o, h, l, c in zip(res['timestamp'], q['open'], q['high'], q['low'], q['close']) if None not in (o, h, l, c)]
+            if len(bars) >= 3: out = {'bars': bars, 'currency': (res.get('meta') or {}).get('currency') or 'USD', 'src': 'Yahoo Finance'}; break
+        except Exception as e: log('Yahoo', sym, host, e)
+    if not out and re.fullmatch(r'[A-Z0-9]+-USD', sym):  # крипта — Gate
+        try:
+            gi = {'1h': '1h', '1d': '1d', '1wk': '7d'}[interval]; lim = min(900, RANGE_DAYS[rng] * (24 if gi == '1h' else 1) // (7 if gi == '7d' else 1) + 1)
+            u = f'https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair={sym[:-4]}_USDT&interval={gi}&limit={lim}'
+            with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=20) as r: rows = json.load(r)
+            out = {'bars': [[int(x[0]), float(x[5]), float(x[3]), float(x[4]), float(x[2])] for x in rows], 'currency': 'USD', 'src': 'Gate'}
+        except Exception as e: log('Gate', sym, e)
+    if not out and interval != '1h':  # дневные — Stooq
+        try:
+            st = STOOQ.get(sym) or (sym[:6].lower() if sym.endswith('=X') else sym.lower() + '.us')
+            with urllib.request.urlopen(urllib.request.Request(f'https://stooq.com/q/d/l/?s={urllib.parse.quote(st)}&i=d', headers=UA), timeout=20) as r: lines = r.read().decode().strip().splitlines()[1:]
+            rows = [l.split(',') for l in lines][-RANGE_DAYS[rng]:]
+            bars = [[int(datetime.datetime.strptime(x[0], '%Y-%m-%d').replace(tzinfo=datetime.timezone.utc).timestamp()), *map(float, x[1:5])] for x in rows if len(x) >= 5]
+            if len(bars) >= 3: out = {'bars': bars, 'currency': 'USD', 'src': 'Stooq'}
+        except Exception as e: log('Stooq', sym, e)
+    QUOTES[k] = out
+    return out
+
+
+def agg(bars, n=60):
+    # не больше n свечей: соседние объединяем (время — первой свечи группы)
+    if len(bars) <= n: return bars
+    g = -(-len(bars) // n); out = []
+    for i in range(len(bars) % g, len(bars), g):  # с конца: последняя свеча — самая свежая
+        ch = bars[i:i + g]; out.append([ch[0][0], ch[0][1], max(b[2] for b in ch), min(b[3] for b in ch), ch[-1][4]])
+    return out
+
+
+PERIOD = {'ru': {'5d': 'за 5 дней', '1mo': 'за месяц', '3mo': 'за 3 месяца', '6mo': 'за полгода', '1y': 'за год'},
+          'en': {'5d': 'in 5 days', '1mo': 'in a month', '3mo': 'in 3 months', '6mo': 'in 6 months', '1y': 'in a year'},
+          'uz': {'5d': '5 kunda', '1mo': 'bir oyda', '3mo': '3 oyda', '6mo': 'yarim yilda', '1y': 'bir yilda'}}
+CTA_TXT = {'ru': ('Напиши в комментариях', 'пришлю разбор и уровни'), 'en': ('Comment the word', 'and I’ll send the breakdown'), 'uz': ('Izohga yozing', 'tahlil va darajalarni yuboraman')}
+
+
+def money_prefix(sym, cur):
+    return '' if (sym.endswith('=X') or sym.startswith('^') or sym == 'DX-Y.NYB') else ('$' if (cur or 'USD') == 'USD' else '')
+
+
+def beat_times(ws, beats):
+    out, j = [], 0
+    for b in beats or []:
+        nb = norm(b)
+        if not nb: continue
+        for i in range(j, len(ws)):
+            nw = norm(ws[i][0])
+            if nw and (nw.startswith(nb) or (len(nw) > 3 and nb.startswith(nw))): out.append(round(ws[i][1], 3)); j = i + 1; break
+    return out
+
+
+def scene_data2(s, L, script):
+    t = s.get(L) or {}; ty = s.get('type') or 'counter'
+    g = lambda k, dflt='': t.get(k) if t.get(k) not in (None, '') else dflt
+    d = {'type': ty, 'kicker': g('kicker'), 'title': g('title'), 'accent': g('accent'), 'source': g('source')}
+    sym = (s.get('symbol') or script.get('asset') or '').strip()
+    if ty == 'hook':
+        d.update(label=g('label'), prefix=g('prefix'), suffix=g('suffix'), dir=s.get('dir') or 'none')
+        if s.get('value') is not None: d['value'] = s['value']; d['decimals'] = s.get('decimals') or (0 if float(s['value']).is_integer() else 1)
+        if s.get('from') is not None: d['from'] = s['from']
+        qq = quotes(sym, '1mo', '1d') if sym else None
+        if qq: d['series'] = [b[4] for b in qq['bars']][-40:]
+    elif ty == 'candles':
+        rng = s.get('range') or '1mo'; iv = s.get('interval') or ('1h' if rng == '5d' else '1wk' if rng == '1y' else '1d')
+        qq = quotes(sym, rng, iv) if sym else None
+        if qq and len(qq['bars']) >= 5:
+            bars = agg(qq['bars'], 60)
+            d.update(bars=[[round(b[1], 4), round(b[2], 4), round(b[3], 4), round(b[4], 4)] for b in bars], period=PERIOD[L][rng], prefix=money_prefix(sym, qq['currency']),
+                     mark_label=g('mark_label'), source=g('source') or f'{sym} · {qq["src"]}')
+            if s.get('mark_date'):
+                try:
+                    md = datetime.datetime.strptime(s['mark_date'][:10], '%Y-%m-%d').replace(tzinfo=datetime.timezone.utc).timestamp()
+                    idx = max([i for i, b in enumerate(bars) if b[0] <= md + 86399] or [0])
+                    if bars[0][0] <= md + 86399 and md <= bars[-1][0] + 2 * 86400: d['mark'] = idx  # дата вне графика — без отметки
+                except Exception: pass
+            lb, tn = t.get('level_labels') or [], s.get('level_tones') or []
+            lo, hi = min(b[3] for b in bars), max(b[2] for b in bars); span = hi - lo
+            d['levels'] = [{'price': v, 'tone': tn[i] if i < len(tn) else 'gold', 'label': lb[i] if i < len(lb) else ''} for i, v in enumerate((s.get('levels') or [])[:3])
+                           if isinstance(v, (int, float)) and lo - span * 0.6 <= v <= hi + span * 0.6]  # уровень далеко от графика сплющит свечи — не рисуем
+        elif s.get('value') is not None:
+            d.update(type='counter', value=s['value'], decimals=s.get('decimals') or 0, label=g('mark_label'), prefix=g('prefix'), suffix=g('suffix'))
+        else:
+            d.update(type='hook', label=g('mark_label'), dir=s.get('dir') or 'none')
+    elif ty == 'counter':
+        d.update(value=s.get('value') or 0, decimals=s.get('decimals') or 0, label=g('label'), prefix=g('prefix'), suffix=g('suffix'), tone=s.get('tone') or '')
+        if s.get('from') is not None: d['from'] = s['from']
+        if s.get('ref_value'):
+            gap = (d['value'] / s['ref_value'] - 1) * 100
+            d['ref'] = {'value': s['ref_value'], 'label': {'ru': 'сейчас', 'en': 'now', 'uz': 'hozir'}[L], 'target': g('label'), 'gap': ('+' if gap >= 0 else '−') + f'{abs(gap):.1f}%'.replace('.', ',' if L != 'en' else '.')}
+            d['label'] = ''
+    elif ty == 'versus':
+        d.update(a={'label': g('a_label'), 'display': g('a_display'), 'value': s.get('a_value') or 1, 'tone': s.get('a_tone') or 'gold'},
+                 b={'label': g('b_label'), 'display': g('b_display'), 'value': s.get('b_value') or 1, 'tone': s.get('b_tone') or 'txt'}, badge=g('badge'))
+    elif ty == 'grid': d.update(total=s.get('total') or 10, count=s.get('count') or 0, tone=s.get('tone') or 'down', label=g('label'))
+    elif ty == 'ring': d.update(pct=s.get('pct') or 0, tone=s.get('tone') or 'gold', label=g('label'))
+    elif ty == 'bars':
+        vals = s.get('values') or []
+        d['items'] = [{'label': it.get('label', ''), 'display': it.get('display', ''), 'value': vals[i] if i < len(vals) else 0} for i, it in enumerate(t.get('items') or [])]
+    elif ty == 'chain': d['items'] = [{'label': it.get('label', ''), 'sub': it.get('sub', '')} for it in (t.get('items') or [])][:4]
+    elif ty == 'timeline': d['items'] = [{'date': it.get('date', ''), 'label': it.get('label', '')} for it in (t.get('items') or [])][:5]
+    elif ty == 'checklist': d['items'] = (t.get('list') or [it.get('label', '') for it in (t.get('items') or [])])[:4]
+    elif ty == 'headline': d.update(source_name=s.get('source_name') or '', date=g('date'), text=g('text') or g('title'), highlight=g('highlight'), tone=s.get('tone') or '', source='')
+    elif ty == 'ticker':
+        names = t.get('names') or []; rng = s.get('range') or '5d'; its = []
+        for i, sy in enumerate((s.get('symbols') or [])[:3]):
+            qq = quotes(sy, rng, '1h' if rng == '5d' else '1d')
+            if not qq: continue
+            b = qq['bars']; its.append({'symbol': sy.replace('-USD', '').replace('=F', '').replace('^', ''), 'name': names[i] if i < len(names) else '',
+                                        'price': b[-1][4], 'change': (b[-1][4] / b[0][1] - 1) * 100, 'series': [x[4] for x in b][-60:]})
+        d['items'] = its
+        if not its: d.update(type='hook')
+    elif ty == 'cta':
+        k, c = CTA_TXT[L]; d.update(title=re.sub(r'[^A-Z0-9]', '', str(g('title')).upper()) or 'TRAI', kicker=g('kicker', k), cta=g('cta', c))
+    # пустые сцены не показываем пустыми
+    if d['type'] in ('chain', 'timeline', 'checklist', 'bars') and not d.get('items'): d['type'] = 'hook'
+    return d
+
+
 def make_video(script, L, idx, stamp, mock=False):
     work = os.path.join(OUTDIR, f'{stamp}_{idx}_{L}')
     os.makedirs(work, exist_ok=True)
@@ -616,9 +925,9 @@ def make_video(script, L, idx, stamp, mock=False):
             toks = [(w, i) for i, sy in enumerate(says) for w in words_of(sy)]
             heard = whisper_words(p, L); tm = align_text([w for w, _ in toks], heard, len(a) / SR)
             # лишняя речь перед первым словом сценария (модель прочитала инструкцию) — вырезаем
-            cut = max(0.0, (tm[0] if tm else 0) - 0.12)
-            if cut > 0.6:
-                log(f'вырезаю {cut:.1f} с лишней речи в начале'); a = a[int(cut * SR):]; tm = [max(0.0, x_ - cut) for x_ in tm]
+            cut = safe_cut(a, tm[0] if tm else 0.0, heard)
+            if cut > 0:
+                log(f'вырезаю {cut:.2f} с лишней речи в начале'); a = a[int(cut * SR):].copy(); n_ = int(0.01 * SR); a[:n_] *= np.linspace(0, 1, n_); tm = [max(0.0, x_ - cut) for x_ in tm]
             # после последнего слова у Gemini бывает шум/«жужжание» — обрезаем через 0,3 с после конца речи и плавно гасим
             le = getattr(whisper_words, 'last_end', None)
             if le and le - cut + 0.3 < len(a) / SR:
@@ -654,17 +963,18 @@ def make_video(script, L, idx, stamp, mock=False):
             if i < len(parts) - 1: vv.append(np.zeros(int(gap * SR))); t += gap
         voice = np.concatenate(vv)
     # 2) таймлайн: сцена начинается с её первого слова, субтитры — по словам внутри сцены
-    scenes, subs = [], []
+    scenes, subs, v2 = [], [], script.get('v') == 2
     for i, s in enumerate(sc):
         ws = [[w, t_] for w, t_, k in tok_scene if k == i]
-        d = scene_data(s, L, work); st = ws[0][1] if ws else (scenes[-1]['start'] + 2.5 if scenes else 0.3)
-        d['start'] = 0.0 if i == 0 else round(max(st - 0.12, scenes[-1]['start'] + 0.8), 3)
+        d = scene_data2(s, L, script) if v2 else scene_data(s, L, work); st = ws[0][1] if ws else (scenes[-1]['start'] + 2.5 if scenes else 0.3)
+        d['start'] = 0.0 if i == 0 else round(max(st - (0.18 if v2 else 0.12), scenes[-1]['start'] + 0.8), 3)
+        if v2: d['beats'] = beat_times(ws, (s.get(L) or {}).get('beats') or [])
         scenes.append(d); subs += chunks(ws, s[L].get('keys') or [])
     t = len(voice) / SR
-    outro = round(max(t + 0.5, 28.0), 3); total = round(outro + 2.0, 3)  # ролик не короче 30 с
+    outro = round(max(t + 0.5, 28.0), 3); total = round(outro + (2.3 if v2 else 2.0), 3)  # ролик не короче 30 с
     for i, d in enumerate(scenes): d['end'] = scenes[i + 1]['start'] if i + 1 < len(scenes) else outro
-    beats = [c['w'][c['key']][1] for c in subs if c.get('key', -1) >= 0]
-    job = {'lang': L, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': DISCLAIMER[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
+    beats = [] if v2 else [c['w'][c['key']][1] for c in subs if c.get('key', -1) >= 0]
+    job = {'template': 'scene2.html' if v2 else 'scene.html', 'lang': L, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': (DISCLAIMER_SHORT if v2 else DISCLAIMER)[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
     jp = os.path.join(work, 'job.json'); json.dump(job, open(jp, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     v = np.concatenate([voice, np.zeros(max(0, int(total * SR) - len(voice)))])[:int(total * SR)]
     with wave.open(os.path.join(work, 'voice.wav'), 'wb') as w:
@@ -717,9 +1027,23 @@ MOCK = {'topic': 'Всё золото мира против биткоина (п
         ]}
 
 
+MOCK2 = {'v': 2, 'topic': 'Биткоин падает пятую неделю подряд (проверка шаблона)', 'category': 'crypto', 'asset': 'BTC-USD',
+         'post': {l: {'caption': 'Проверочный ролик', 'hashtags': '#bitcoin #btc'} for l in LANGS_ALL},
+         'scenes': [
+             {'type': 'hook', 'value': -12.4, 'decimals': 1, 'dir': 'down', 'symbol': 'BTC-USD', 'ru': {'say': 'Биткоин падает пятую неделю подряд. Минус 12% — это 216 миллиардов долларов.', 'kicker': 'BTC · Биткоин', 'title': 'Пять недель\nподряд вниз', 'accent': 'пять вниз', 'label': 'с 4 октября · −216 млрд $', 'suffix': '%', 'beats': ['Минус', '216'], 'keys': ['пятую']}},
+             {'type': 'grid', 'total': 5, 'count': 5, 'tone': 'down', 'ru': {'say': 'С начала октября каждая неделя закрылась ниже прошлой. Пять из пяти.', 'kicker': 'Недельные закрытия', 'title': '5 из 5 недель\nв минусе', 'accent': '5', 'label': '−3,3% · −2,0% · −2,4% · −2,3% · −3,2%', 'beats': ['каждая', 'Пять'], 'keys': ['Пять']}},
+             {'type': 'candles', 'symbol': 'BTC-USD', 'range': '1mo', 'interval': '1d', 'mark_date': '2026-11-04', 'levels': [81765, 73176], 'level_tones': ['gold', 'blue'], 'ru': {'say': 'После выборов в США цена отскочила до 81 тысячи — и за пару дней отдала весь рост.', 'kicker': 'BTC/USD · дневные свечи', 'mark_label': 'отскок после выборов', 'level_labels': ['50-дневная средняя', '200-дневная средняя'], 'source': 'Данные: Kraken', 'beats': ['отскочила', 'отдала'], 'keys': ['отдала']}},
+             {'type': 'chain', 'ru': {'say': 'Почему? Из биржевых фондов за пять дней ушло больше миллиарда. Один IBIT — минус 403 миллиона за день. И цена провалилась под среднюю.', 'kicker': 'Почему падает', 'title': 'Кто продаёт', 'accent': 'продаёт', 'source': 'Потоки ETF: Farside', 'items': [{'label': 'Отток из ETF', 'sub': '−1,28 млрд $ за 5 сессий'}, {'label': 'IBIT от BlackRock', 'sub': '−403 млн $ за день, 6 ноября'}, {'label': 'Цена под 50-дневной', 'sub': '−7,3% от средней'}], 'beats': ['фондов', 'IBIT', 'провалилась'], 'keys': ['миллиарда']}},
+             {'type': 'counter', 'value': 73176, 'ref_value': 75774, 'tone': 'blue', 'ru': {'say': 'Но главное — не серия. Чуть больше трёх процентов ниже лежит двухсотдневная средняя. 73 тысячи.', 'kicker': 'Главный уровень', 'title': 'До него\nвсего 3,4%', 'accent': '3,4%', 'label': '200-дневная', 'prefix': '$', 'beats': ['73'], 'keys': ['главное']}},
+             {'type': 'checklist', 'ru': {'say': 'Смотрим три вещи. Неделя выше 78 тысяч прервёт серию. День под двухсотдневной сломает структуру. И потоки в фонды.', 'kicker': 'Что смотреть дальше', 'title': 'Три сигнала', 'accent': 'три', 'list': ['Недельное закрытие выше $78 239', 'Дневное закрытие у $73 176', 'Потоки ETF после выходных'], 'beats': ['Неделя', 'День', 'потоки'], 'keys': ['три']}},
+             {'type': 'cta', 'ru': {'say': 'Напиши в комментариях BTC — пришлю разбор.', 'title': 'BTC', 'beats': [], 'keys': ['BTC']}},
+         ]}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--count', type=int, default=1); ap.add_argument('--langs', default='ru,en,uz'); ap.add_argument('--formats', default='')
+    ap.add_argument('--mode', default='story', choices=['story', 'gold'])  # story — истории любого рынка за неделю; gold — старые темы про золото
     ap.add_argument('--mock', action='store_true')
     a = ap.parse_args(); langs = [l for l in a.langs.split(',') if l in LANGS_ALL]
     os.makedirs(OUTDIR, exist_ok=True)
@@ -727,11 +1051,24 @@ def main():
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d_%H%M')
     order = [f for f in (a.formats.split(',') if a.formats else []) if f in FORMATS] or ['levels', 'hype', 'pattern', 'options', 'news', 'indicators', 'fact']
     start = len(hist) % len(order) if not a.formats else 0
-    made = []
+    made = []; cats_run = []
     for n in range(a.count):
-        fmt = order[(start + n) % len(order)]
+        fmt = 'story' if a.mode == 'story' else order[(start + n) % len(order)]
         try:
-            if a.mock:
+            if a.mode == 'story':
+                if a.mock:
+                    script, src, models = json.loads(json.dumps(MOCK2)), ['проверка'], 'mock'; langs = ['ru']; p0 = 86500.0; bb = []
+                    for k in range(32): o = p0; p0 *= 1 + float(np.sin(k / 3) * 0.012 - 0.004); bb.append([1791417600 + k * 86400, o, max(o, p0) * 1.006, min(o, p0) * 0.994, p0])
+                    QUOTES[('BTC-USD', '1mo', '1d')] = {'bars': bb, 'currency': 'USD', 'src': 'mock'}
+                else:
+                    # разнообразие: категория не как у двух последних роликов и не как у уже сделанных в этом запуске
+                    avoid = set(cats_run) | {h.get('category') for h in hist[-2:] if h.get('category')}
+                    facts, src, m1, cat = research_story(hist, avoid); log('история/факты:', m1, facts[:500].replace('\n', ' '))
+                    script, m2 = make_script_story(facts); models = f'{m1}, {m2}'
+                    script['category'] = script.get('category') or cat
+                    json.dump({'facts': facts, 'sources': src, 'script': script}, open(os.path.join(OUTDIR, f'script_{stamp}_{n}.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+                cats_run.append(script.get('category') or '')
+            elif a.mock:
                 script, src, models = MOCK, ['проверка'], 'mock'; langs = ['ru']; p0 = 4080.0; bb = []
                 for k in range(200): o = p0; p0 += float(np.sin(k / 9) * 4 + np.cos(k / 3.1) * 3); bb.append([k * 3600, o, max(o, p0) + 3, min(o, p0) - 3, p0])
                 gz = [[round(float(np.exp(-((4000 + j * 10 - 4080 - 30) / 45) ** 2) * 90 * (1 + .3 * np.sin(i / 5)) - np.exp(-((4000 + j * 10 - 4080 + 50) / 40) ** 2) * 80), 2) for j in range(41)] for i in range(60)]
@@ -751,7 +1088,7 @@ def main():
                     tg_send(path, cap); made.append(path)
                 except Exception as e:
                     log(f'ошибка ({L}):', e); tg_text(f'TRAI видео: не получилось собрать {L.upper()} «{script["topic"]}»: {e}')
-            hist.append({'date': stamp, 'format': fmt, 'topic': script['topic']})
+            hist.append({'date': stamp, 'format': fmt, 'topic': script['topic'], 'category': script.get('category', ''), 'asset': script.get('asset', '')})
         except Exception as e:
             log('ошибка темы:', e); tg_text(f'TRAI видео: не получилось сделать ролик ({fmt}): {e}')
     if not a.mock: json.dump(hist[-200:], open(HIST, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)

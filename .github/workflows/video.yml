@@ -1,6 +1,6 @@
-# TRAI — ролики про золото: сценарий (Gemini + поиск Google) → озвучка Azure → кадры → эффекты → Telegram (файлом, без сжатия).
-# Запуск сейчас: изменить video/run.json в ветке dev (count — сколько тем, langs — языки) и сохранить (commit).
-# После переноса в main заработает и расписание (каждый день) и кнопка «Run workflow».
+# TRAI — ролики «истории рынка»: история недели (Gemini + поиск Google) → сценарий RU/EN/UZ → голос Gemini → кадры scene2.html → эффекты → Telegram.
+# Расписание: каждый день 2 истории × 3 языка. Разовый запуск: изменить video/run.json (count, langs, mode: story | gold) и сохранить (commit),
+# или кнопка «Run workflow».
 name: video
 on:
   push:
@@ -10,6 +10,7 @@ on:
     inputs:
       count: { description: 'Сколько тем', default: '1' }
       langs: { description: 'Языки', default: 'ru,en,uz' }
+      mode: { description: 'story — истории любого рынка, gold — старые темы про золото', default: 'story' }
   schedule:
     - cron: '0 3 * * *'   # 08:00 Ташкент (GitHub иногда запускает с опозданием на 5–20 минут)
 concurrency: { group: video, cancel-in-progress: false }
@@ -58,12 +59,13 @@ jobs:
           ELEVEN_VOICE_EN: ${{ vars.ELEVEN_VOICE_EN }}
           ELEVEN_VOICE_UZ: ${{ vars.ELEVEN_VOICE_UZ }}
         run: |
-          COUNT="${{ github.event.inputs.count }}"; LANGS="${{ github.event.inputs.langs }}"
+          COUNT="${{ github.event.inputs.count }}"; LANGS="${{ github.event.inputs.langs }}"; MODE="${{ github.event.inputs.mode }}"
           if [ -z "$COUNT" ]; then COUNT=$(python3 -c "import json;print(json.load(open('video/run.json')).get('count',1))"); fi
           if [ -z "$LANGS" ]; then LANGS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('langs','ru,en,uz'))"); fi
+          if [ -z "$MODE" ]; then MODE=$(python3 -c "import json;print(json.load(open('video/run.json')).get('mode','story'))"); fi
           FORMATS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('formats',''))")
-          if [ "${{ github.event_name }}" = "schedule" ]; then COUNT=3; LANGS=ru,en,uz; FORMATS=; fi
-          NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --formats "$FORMATS"
+          if [ "${{ github.event_name }}" = "schedule" ]; then COUNT=2; LANGS=ru,en,uz; MODE=story; FORMATS=; fi
+          NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --mode "$MODE" --formats "$FORMATS"
       - name: Сохранить историю тем
         if: always()
         uses: actions/cache/save@v4

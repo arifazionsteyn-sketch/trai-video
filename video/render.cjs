@@ -1,6 +1,7 @@
 // Кадры ролика → mp4 без звука. node render.cjs job.json out.mp4           — весь ролик
 //                                   node render.cjs job.json - 2.5 7.5 …   — кадры для проверки (pv_*.png)
-// Chrome рисует canvas из scene.html (данные — job.json), кадры JPEG идут в ffmpeg без промежуточных файлов.
+// Chrome рисует canvas из шаблона (job.template или TEMPLATE, по умолчанию scene.html; новые ролики — scene2.html),
+// данные — job.json, кадры JPEG идут в ffmpeg без промежуточных файлов.
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs'), path = require('path');
@@ -14,7 +15,8 @@ const DIR = __dirname, FPS = 30;
   const p = await b.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.addInitScript(j => { window.JOB = j; }, job);
-  await p.goto('file://' + path.join(DIR, 'scene.html')); await p.evaluate(() => window.ready);
+  const tpl = process.env.TEMPLATE || job.template || 'scene.html';
+  await p.goto('file://' + path.join(DIR, tpl)); await p.evaluate(() => window.ready);
   const cv = await p.$('#c');
   if (out === '-') {
     for (const t of times.map(Number)) { await p.evaluate(t => window.render(t), t); await cv.screenshot({ path: path.join(path.dirname(jobPath), `pv_${String(t).replace('.', '_')}.png`) }); }

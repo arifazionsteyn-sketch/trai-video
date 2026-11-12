@@ -58,6 +58,20 @@ for k, s in enumerate(job['scenes']):
     elif s['type'] in ('pattern', 'line'):
         place(pac, s['start'] + 0.3 + min(2.6, d * 0.62), 0.10)
 
+# сцены v2: мягкий «пак» на каждом ударе (слово диктора, на котором меняется картинка)
+for k, s in enumerate(job['scenes']):
+    bt = s.get('beats') or []
+    if s['type'] == 'cta':
+        w = len(str(s.get('title') or 'GOLD'))
+        for i in range(w): place(keys[(i * 7) % len(keys)], s['start'] + 0.35 + i * 0.09, 0.12, -0.2 + 0.4 * i / max(1, w))
+        continue
+    if s['type'] not in ('hook', 'candles', 'counter', 'chain', 'versus', 'grid', 'timeline', 'headline', 'checklist', 'ring', 'bars', 'ticker'): continue
+    for i, t in enumerate(bt[:5]):
+        place(pac2 if i % 2 else pac, t - 0.01, 0.09 if i else 0.11, [-0.3, 0.3, 0, -0.2, 0.2][i % 5])
+    if s['type'] == 'grid' and bt:
+        n = int(s.get('count') or 0)
+        for i in range(min(n, 12)): place(pac2, bt[0] + i * (0.9 / max(1, n)), 0.05, -0.4 + 0.8 * i / max(1, n - 1))
+
 url = 'trai-agent.com'; typeA = OUT + 0.1; per = 0.06
 order = rng.permutation(len(keys))
 for i in range(len(url)):

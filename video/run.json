@@ -1,1 +1,1 @@
-{"count": 1, "formats": "levels", "langs": "ru,en,uz", "try": 16, "note": "count — сколько тем, formats — темы через запятую (levels, hype, pattern, options, news, indicators, fact) или пусто — по очереди"}
+{"count": 1, "mode": "story", "langs": "ru,en,uz", "formats": "", "try": 17, "note": "count — сколько историй, mode — story (истории любого рынка за неделю) или gold (старые темы про золото; formats — темы через запятую)"}
