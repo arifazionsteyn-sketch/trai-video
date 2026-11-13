@@ -1,0 +1,34 @@
+# Проверка телефонной версии dev-сайта: снимки всех разделов (iPhone 390×844) в ветку phone-out.
+name: phone-shots
+on:
+  push:
+    branches: [main]
+    paths: ['video/phone.json']
+  workflow_dispatch:
+concurrency: { group: phone-shots, cancel-in-progress: true }
+permissions:
+  contents: write
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1
+      - name: Ждём выкладку Vercel
+        run: sleep "$(python3 -c "import json;print(json.load(open('video/phone.json')).get('wait',100))")"
+      - name: Снимки
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        run: |
+          PHONE_LANG=$(python3 -c "import json;print(json.load(open('video/phone.json')).get('lang','ru'))") \
+          PHONE_VIEWS=$(python3 -c "import json;print(json.load(open('video/phone.json')).get('views','overview,market,news,tech,flow,strange,gamma,agents,watch,journal,accuracy,settings'))") \
+          NODE_PATH=/tmp/pw/node_modules node video/phone_shots.cjs out
+      - name: В ветку phone-out
+        if: always()
+        run: |
+          mkdir -p out && cd out && echo '{"git":{"deploymentEnabled":false}}' > vercel.json && git init -q -b phone-out && git add -A
+          git -c user.name=trai-bot -c user.email=bot@trai-agent.com commit -qm "телефон ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" phone-out
