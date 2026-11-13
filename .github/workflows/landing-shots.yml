@@ -1,0 +1,41 @@
+# Скриншоты для витрины TRAI: живые разделы dev-сайта → WebP 1440 px в ветку shots-out.
+# Запуск: изменить video/shots.json или кнопка «Run workflow».
+name: landing-shots
+on:
+  push:
+    branches: [main]
+    paths: ['video/shots.json']
+  workflow_dispatch:
+concurrency: { group: landing-shots, cancel-in-progress: true }
+permissions:
+  contents: write
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: |
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1
+          pip install -q pillow
+      - name: Ждём выкладку Vercel
+        run: sleep 120
+      - name: Снимки
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        run: NODE_PATH=/tmp/pw/node_modules node video/landing_shots.cjs shots
+      - name: В WebP 1440 px
+        run: |
+          mkdir -p out && python3 - <<'PY'
+          from PIL import Image; import glob, os
+          for f in glob.glob('shots/*.png'):
+              im = Image.open(f).convert('RGB'); w, h = im.size; im = im.resize((1440, round(h * 1440 / w)), Image.LANCZOS)
+              n = os.path.basename(f)[:-4]; im.save(f'out/{n}.webp', 'WEBP', quality=88, method=6); print(n, im.size)
+          PY
+      - name: В ветку shots-out
+        run: |
+          cd out && echo '{"git":{"deploymentEnabled":false}}' > vercel.json && git init -q -b shots-out && git add -A
+          git -c user.name=trai-bot -c user.email=bot@trai-agent.com commit -qm "снимки ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" shots-out
