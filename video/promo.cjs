@@ -112,7 +112,9 @@ async function record(b) {
 }
 
 const STEP = process.env.PROMO_STEP || 'all'; // record — только запись разделов (кадры + job.json); render — кадры FROM..TO в отдельный кусок; all — всё сразу
-const encArgs = () => HERO ? ['-c:v', 'libx264', '-preset', 'slow', '-crf', '21', '-maxrate', '8M', '-bufsize', '16M'] : ['-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-maxrate', '40M', '-bufsize', '80M', '-tune', 'film'];
+// лёгкая резкость (unsharp): мелкие цифры на экране ноутбука после перспективы не «мылятся»
+const SHARP = ['-vf', 'unsharp=5:5:0.6:3:3:0'];
+const encArgs = () => HERO ? [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-maxrate', '9M', '-bufsize', '18M'] : [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-maxrate', '40M', '-bufsize', '80M', '-tune', 'film'];
 
 async function doRecord(exe) {
   fs.mkdirSync(path.join(OUT, 'f'), { recursive: true });
