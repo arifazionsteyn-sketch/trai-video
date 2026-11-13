@@ -5,7 +5,7 @@ const { chromium } = require('playwright'); const crypto = require('crypto'); co
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
 const LANG = process.env.SHOTS_LANG || 'ru', WAIT = +(process.env.SHOTS_WAIT || 720), ONLY = (process.env.SHOTS_ONLY || '').split(',').filter(Boolean), want = n => !ONLY.length || ONLY.includes(n), OUT = path.resolve(process.argv[2] || 'shots');
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
-const CLEAN = '.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRing{display:none!important}';
+const CLEAN = 'header.top,.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRing{display:none!important}';
 
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
