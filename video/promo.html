@@ -18,7 +18,7 @@ html, body { margin: 0; overflow: hidden; background: #050607; }
 #bar { position: absolute; left: 140px; right: 140px; bottom: 236px; height: 6px; display: flex; gap: 8px; }
 #bar i { flex: 1; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; position: relative; }
 #bar i b { position: absolute; inset: 0; width: 0; background: #C9A65F; }
-body.hero .ov, body.hero #bar { display: none; }
+body.hero .ov, body.hero #bar, body.story .ov, body.story #bar { display: none; } /* story — вертикальный ролик без надписей */
 /* светлая тема: белый фон, тёмный текст */
 body.light { background: #F5F5F3; } body.light .ov { color: #111214; } body.light #kick { color: #9C7A35; } body.light #sub { color: #5B5F66; }
 body.light #bot { color: #6B7078; } body.light #bot b { color: #9C7A35; } body.light #bar i { background: rgba(0,0,0,.1); } body.light #bar i b { background: #B8913F; }
@@ -37,7 +37,7 @@ import { RoundedBoxGeometry } from 'https://esm.sh/three@0.170.0/examples/jsm/ge
 import { RoomEnvironment } from 'https://esm.sh/three@0.170.0/examples/jsm/environments/RoomEnvironment.js';
 const J = window.JOB, SEC = J.sections, HERO = J.mode === 'hero', W = J.w, H = J.h, LIGHT = J.theme === 'light';
 document.body.classList.toggle('light', LIGHT);
-document.body.classList.toggle('hero', HERO); document.body.style.width = W + 'px'; document.body.style.height = H + 'px';
+document.body.classList.toggle('hero', HERO); document.body.classList.toggle('story', J.mode === 'story'); document.body.style.width = W + 'px'; document.body.style.height = H + 'px';
 const cl = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x)), eo = x => 1 - (1 - cl(x)) ** 3, eio = x => { x = cl(x); return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2; };
 const ss = x => { x = cl(x); return x * x * x * (x * (x * 6 - 15) + 10); }; // очень мягкий разгон и торможение
 

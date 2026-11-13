@@ -6,7 +6,8 @@ const { chromium } = require('playwright'); const crypto = require('crypto'); co
 const { spawn } = require('child_process');
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
 const THEME = process.env.PROMO_THEME || 'dark';
-const LANG = process.env.PROMO_LANG || 'ru', MODE = process.env.PROMO_MODE || 'reel', HERO = MODE === 'hero';
+// story — тот же вертикальный ролик, но без надписей (для сторис)
+const LANG = process.env.PROMO_LANG || 'ru', MODE = process.env.PROMO_MODE || 'reel', HERO = MODE === 'hero', STORY = MODE === 'story';
 const OUT = path.resolve(process.argv[2] || 'promo_out'), DIR = __dirname, FPS = +(process.env.PROMO_FPS || 60);
 // rec — плотность записи сайта, recW — для «Наблюдателя» (в ролике наезд на каждый его блок, поэтому пишем плотнее)
 const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1.5, recW: 2.5, screenW: 2400 } : { w: 1080, h: 1920, scale: 2, rec: 2, recW: 3, screenW: 3200 };
@@ -158,7 +159,7 @@ async function doRender(exe, job, from, to, file) {
 
 (async () => {
   const exe = fs.existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined;
-  const name = (HERO ? 'trai_hero' : `trai_promo_${LANG}`) + (THEME === 'light' ? '_white' : '');
+  const name = (HERO ? 'trai_hero' : STORY ? 'trai_story' : `trai_promo_${LANG}`) + (THEME === 'light' ? '_white' : '');
   if (STEP === 'record') { await doRecord(exe); console.log('запись готова'); return; }
   const job = STEP === 'render' ? JSON.parse(fs.readFileSync(path.join(OUT, 'job.json'), 'utf8')) : await doRecord(exe);
   const n = Math.round(job.total * FPS);
