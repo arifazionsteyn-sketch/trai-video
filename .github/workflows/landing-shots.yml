@@ -25,7 +25,7 @@ jobs:
       - name: Снимки
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        run: NODE_PATH=/tmp/pw/node_modules node video/landing_shots.cjs shots
+        run: SHOTS_ONLY=$(python3 -c "import json;print(json.load(open('video/shots.json')).get('only',''))") NODE_PATH=/tmp/pw/node_modules node video/landing_shots.cjs shots
       - name: В WebP 1440 px
         run: |
           mkdir -p out && python3 - <<'PY'

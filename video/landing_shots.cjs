@@ -3,7 +3,7 @@
 // node video/landing_shots.cjs out_dir · SHOTS_LANG=ru · SHOTS_WAIT=720
 const { chromium } = require('playwright'); const crypto = require('crypto'); const fs = require('fs'), path = require('path');
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
-const LANG = process.env.SHOTS_LANG || 'ru', WAIT = +(process.env.SHOTS_WAIT || 720), OUT = path.resolve(process.argv[2] || 'shots');
+const LANG = process.env.SHOTS_LANG || 'ru', WAIT = +(process.env.SHOTS_WAIT || 720), ONLY = (process.env.SHOTS_ONLY || '').split(',').filter(Boolean), want = n => !ONLY.length || ONLY.includes(n), OUT = path.resolve(process.argv[2] || 'shots');
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
 const CLEAN = '.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRing{display:none!important}';
 
@@ -22,11 +22,15 @@ const CLEAN = '.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRing{display:
   const clipOf = async (sels, pad = 14) => p.evaluate(([sels, pad]) => { const rs = sels.map(s => document.querySelector(s)?.getBoundingClientRect()).filter(Boolean); if (!rs.length) return null;
     const x0 = Math.min(...rs.map(r => r.left)) - pad, y0 = Math.min(...rs.map(r => r.top)) - pad, x1 = Math.max(...rs.map(r => r.right)) + pad, y1 = Math.max(...rs.map(r => r.bottom)) + pad;
     return { x: Math.max(0, x0), y: Math.max(0, y0 + scrollY), width: Math.min(innerWidth, x1) - Math.max(0, x0), height: y1 - Math.max(0, y0) }; }, [sels, pad]);
-  const shot = async (name, sels) => { const c = await clipOf(sels); await p.screenshot({ path: path.join(OUT, name + '.png'), clip: c || undefined, fullPage: !!c }); console.log('снимок', name, JSON.stringify(c)); };
+  // без fullPage: снимок «во всю страницу» на миг меняет размер окна, и 3D-глобус успевает перерисоваться не в том размере
+  const shot = async (name, sels) => { await p.evaluate(s => { const e = document.querySelector(s); if (e) { const r = e.getBoundingClientRect(); scrollTo(0, Math.max(0, scrollY + r.top - 20)); } }, sels[0]); await p.waitForTimeout(1500);
+    const c = await clipOf(sels); if (c) c.y -= await p.evaluate(() => scrollY);
+    await p.screenshot({ path: path.join(OUT, name + '.png'), clip: c || undefined }); console.log('снимок', name, JSON.stringify(c)); };
 
-  await go('strange', 9000); await shot('strange', ['#c-mc']);
-  await go('flow', 12000); await shot('flow', ['.fl-top', '.fl-live']);
-  await go('news', 10000); await shot('globe', ['.news-top']);
+  if (want('strange')) { await go('strange', 9000); await shot('strange', ['#c-mc']); }
+  if (want('flow')) { await go('flow', 12000); await shot('flow', ['.fl-top', '.fl-live']); }
+  if (want('globe')) { await go('news', 12000); await shot('globe', ['.news-top']); }
+  if (!want('watch')) { await b.close(); return; }
   // «Наблюдатель» во весь экран
   await go('watch', 3000);
   await p.addStyleTag({ content: 'body[data-view="watch"] main{padding:8px!important} body[data-view="watch"] .w-grid{height:calc(100vh - 16px)!important;min-height:0!important} body[data-view="watch"] .w-edge{display:none!important}' });
