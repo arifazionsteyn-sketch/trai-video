@@ -46,7 +46,7 @@ const DEMO = {
 
 async function record(b) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: VIEW.rec, locale: LANG === 'en' ? 'en-US' : 'ru-RU', timezoneId: 'Asia/Tashkent' });
-  await ctx.addInitScript(l => { try { localStorage.setItem('trai.lang', JSON.stringify(l)); localStorage.setItem('lang', l); } catch {} }, LANG);
+  await ctx.addInitScript(l => { try { localStorage.setItem('trai.lang', JSON.stringify(l)); localStorage.setItem('lang', l); localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.ck', '1'); } catch {} }, LANG); // без обучающего тура и плашки cookie
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
   const p = await ctx.newPage(); const cdp = await ctx.newCDPSession(p);
   await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(10000);
