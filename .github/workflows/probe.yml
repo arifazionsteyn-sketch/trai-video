@@ -17,6 +17,11 @@ jobs:
         with: { node-version: 20 }
       - env: { TG_BOT_TOKEN: '${{ secrets.TG_BOT_TOKEN }}' }
         run: node video/probe.cjs
+      - name: Шифруем результат (репозиторий публичный — наружу только зашифрованное)
+        run: |
+          tar czf p.tgz probe && rm -rf probe && mkdir enc
+          openssl rand -hex 32 > k && openssl enc -aes-256-cbc -pbkdf2 -salt -in p.tgz -out enc/p.bin -pass file:k
+          openssl pkeyutl -encrypt -pubin -inkey video/probe_pub.pem -in k -out enc/k.bin && rm -f k p.tgz
       - run: |
-          cd probe && git init -q && git checkout -q -b probe-out && git add -A && git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -qm probe
+          cd enc && git init -q && git checkout -q -b probe-out && git add -A && git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -qm probe
           git push -fq "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" probe-out
