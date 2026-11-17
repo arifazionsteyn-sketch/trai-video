@@ -1,4 +1,4 @@
-// Разовая выгрузка сигналов (только чтение, результат шифруется)
+// Разовая выгрузка сигналов (только чтение, результат шифруется) — 2
 const crypto = require('crypto'); const fs = require('fs');
 const SITE = 'https://trai-gold-git-dev-steyn1.vercel.app';
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
