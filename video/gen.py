@@ -829,6 +829,11 @@ topic — заголовок ролика по-русски; category и asset (
 post — подпись для соцсетей на каждом языке (2–3 предложения + призыв зайти в бота @trai_agent_bot, без хэштегов) и hashtags (5–8 штук).'''
 
 
+STOP_WORDS = ['шпион', 'любовн', 'интим', 'арестова', 'обвиня', 'обвинен', 'подозрева', 'мошенни', 'взятк', 'коррупц', 'преступ', 'насили', 'наркот',
+              'spy', 'espionage', 'affair', 'mistress', 'arrested', 'accused', 'alleged', 'fraud', 'bribe', 'criminal',
+              'josus', 'ayg\'ov', 'hibsga', 'firibgar']
+
+
 def make_script_story(facts):
     msg = RULES2 + '\n\nИССЛЕДОВАНИЕ:\n' + facts
     gc = {'temperature': 0.8, 'maxOutputTokens': 20000, 'responseMimeType': 'application/json'}
@@ -867,6 +872,24 @@ def make_script_story(facts):
             sc2 = parse(t2)
             if len(sc2.get('scenes') or []) >= 5: sc = sc2
         except Exception as e: log('сократить не вышло:', e); break
+    # Стоп-слова: обвинения, слухи и личная жизнь людей (шпионаж, связи, аресты) — даже «предполагаемые». Такие сцены переписываем,
+    # а если не вышло — тему бросаем (запасная тема возьмёт другую): аккаунту не нужны претензии за клевету.
+    bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
+    for _ in range(2):
+        hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
+        if not hits: break
+        log('в сценарии слухи/обвинения:', hits, '— переписываю')
+        msg3 = ('Перепиши сценарий: убери всё про личную жизнь, связи, шпионаж, аресты, обвинения и подозрения в адрес людей и компаний — даже со словом «предполагаемый». '
+                'Оставь только рыночные факты: цены, проценты, даты, официальные решения и заявления компаний со ссылкой на издание. Цифры — только из исследования. '
+                'Сохрани структуру, типы сцен и все поля; beats и keys — слова из нового say. Верни тот же JSON.\n\n' + json.dumps(sc, ensure_ascii=False))
+        try:
+            t3, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg3}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
+            sc3 = parse(t3)
+            if len(sc3.get('scenes') or []) >= 5: sc = sc3
+        except Exception as e: log('переписать не вышло:', e)
+    else:
+        hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
+        if hits: raise RuntimeError('в сценарии остались слухи/обвинения: ' + ', '.join(hits))
     sc['v'] = 2
     return sc, model
 
