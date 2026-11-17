@@ -3,7 +3,7 @@ const crypto = require('crypto'); const fs = require('fs'); const { chromium } =
 const SITE = 'https://trai-gold-git-dev-steyn1.vercel.app';
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
 const VIEWS = ['overview', 'agents', 'news', 'tech', 'flow', 'strange', 'gamma', 'market', 'watch', 'journal', 'accuracy', 'settings'];
-const TAG = 'before';
+const TAG = 'after';
 (async () => {
   fs.mkdirSync('probe', { recursive: true }); const log = [];
   const b = await chromium.launch({ args: ['--no-sandbox'] });
@@ -11,7 +11,9 @@ const TAG = 'before';
   await ctx.addInitScript(() => { try { localStorage.setItem('lang', 'ru'); localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.ck', '1'); localStorage.setItem('trai.tf2', '"15"'); localStorage.setItem('trai.mode2', '"an"'); } catch {} });
   await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
   const p = await ctx.newPage(); p.on('pageerror', e => log.push('ERR ' + e.message));
-  await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(15000);
+  await p.goto(SITE + '/#overview', { waitUntil: 'commit' }); await p.waitForTimeout(700); await p.screenshot({ path: 'probe/boot.png' });
+  await p.waitForTimeout(15000);
+  try { await p.click('.tv-tf [data-tf="1"]'); await p.waitForTimeout(300); await p.screenshot({ path: 'probe/chart_loading.png' }); await p.waitForTimeout(6000); await p.screenshot({ path: 'probe/chart_1m.png' }); await p.click('.tv-tf [data-tf="15"]'); await p.waitForTimeout(3000); } catch (e) { log.push('tf ' + e.message); }
   for (const v of VIEWS) {
     await p.evaluate(v => { location.hash = v; }, v); await p.waitForTimeout(v === 'watch' || v === 'gamma' || v === 'flow' ? 12000 : 6000);
     await p.screenshot({ path: `probe/${TAG}_${v}.png`, fullPage: false });
