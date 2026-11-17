@@ -832,13 +832,30 @@ post — подпись для соцсетей на каждом языке (2�
 def make_script_story(facts):
     msg = RULES2 + '\n\nИССЛЕДОВАНИЕ:\n' + facts
     gc = {'temperature': 0.8, 'maxOutputTokens': 20000, 'responseMimeType': 'application/json'}
-    parse = lambda t: json.loads(t.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
-    try: txt, _, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
-    except Exception as e:
-        log('схема не принята:', e)
-        txt, _, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg + '\n\nОтветь JSON строго по этой схеме:\n' + json.dumps(SCHEMA2, ensure_ascii=False)}]}], 'generationConfig': gc}, timeout=240)
-    sc = parse(txt)
-    if len(sc.get('scenes') or []) < 5: raise RuntimeError('слишком короткий сценарий')
+    def parse(t):
+        j = json.loads(t.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
+        if isinstance(j, list) and j and isinstance(j[0], dict) and 'scenes' in j[0]: j = j[0]
+        if isinstance(j, dict) and 'scenes' not in j:  # иногда модель заворачивает ответ: {"script": {...}}
+            j = next((v for v in j.values() if isinstance(v, dict) and 'scenes' in v), j)
+        return j if isinstance(j, dict) else {}
+    # Gemini иногда отдаёт урезанный сценарий (2–4 сцены) — пробуем ещё: снова со схемой, затем без схемы и с другой моделью
+    sc, model, alt = None, '', [m for m in MODELS if m != MODELS[0]] + MODELS[:1]
+    for att in range(4):
+        hint = '' if att == 0 else '\n\nВАЖНО: в массиве scenes должно быть 7–9 сцен по структуре выше — от hook до cta.'
+        try:
+            if att in (0, 1):
+                txt, c, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg + hint}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
+            else:
+                txt, c, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg + hint + '\n\nОтветь JSON строго по этой схеме:\n' + json.dumps(SCHEMA2, ensure_ascii=False)}]}],
+                                        'generationConfig': gc}, timeout=240, models=alt if att == 3 else None)
+            got = parse(txt)
+        except Exception as e:
+            log(f'сценарий, попытка {att + 1}: {e}'); time.sleep(15); continue
+        n = len(got.get('scenes') or [])
+        if n >= 5: sc = got; break
+        log(f'сценарий короткий (попытка {att + 1}, {model}, сцен: {n}, {c.get("finishReason")}): {txt[:300]!r}')
+        time.sleep(15)
+    if not sc: raise RuntimeError('слишком короткий сценарий')
     for _ in range(2):  # длина: 40–50 секунд речи
         wl = [len((x.get('ru') or {}).get('say', '').split()) for x in sc['scenes']]
         if sum(wl) <= 118 and max(wl) <= 24: break
@@ -1144,7 +1161,10 @@ def main():
     order = [f for f in (a.formats.split(',') if a.formats else []) if f in FORMATS] or ['levels', 'hype', 'pattern', 'options', 'news', 'indicators', 'fact']
     start = len(hist) % len(order) if not a.formats else 0
     made = []; cats_run = []
-    for n in range(a.count):
+    spare = 2 if not a.mock else 0  # запасные темы: если тема сорвалась, пробуем другую, чтобы роликов было сколько нужно
+    n, done = -1, 0
+    while done < a.count and n + 1 < a.count + spare:
+        n += 1
         fmt = 'story' if a.mode == 'story' else order[(start + n) % len(order)]
         try:
             if a.mode == 'story':
@@ -1156,6 +1176,7 @@ def main():
                     # разнообразие: категория не как у двух последних роликов и не как у уже сделанных в этом запуске
                     avoid = set(cats_run) | {h.get('category') for h in hist[-2:] if h.get('category')}
                     facts, src, m1, cat = research_story(hist, avoid); log('история/факты:', m1, facts[:500].replace('\n', ' '))
+                    cats_run.append(cat)  # даже если сценарий не выйдет, запасная тема возьмёт другую категорию
                     script, m2 = make_script_story(facts); models = f'{m1}, {m2}'
                     script['category'] = script.get('category') or cat
                     json.dump({'facts': facts, 'sources': src, 'script': script}, open(os.path.join(OUTDIR, f'script_{stamp}_{n}.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
@@ -1181,8 +1202,10 @@ def main():
                 except Exception as e:
                     log(f'ошибка ({L}):', e); tg_text(f'TRAI видео: не получилось собрать {L.upper()} «{script["topic"]}»: {e}')
             hist.append({'date': stamp, 'format': fmt, 'topic': script['topic'], 'category': script.get('category', ''), 'asset': script.get('asset', '')})
+            done += 1
         except Exception as e:
-            log('ошибка темы:', e); tg_text(f'TRAI видео: не получилось сделать ролик ({fmt}): {e}')
+            log('ошибка темы:', e)
+            if done < a.count and n + 1 >= a.count + spare: tg_text(f'TRAI видео: не получилось сделать ролик ({fmt}): {e}')
     if not a.mock: json.dump(hist[-200:], open(HIST, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     log('роликов:', len(made))
     if not made: sys.exit(1)
