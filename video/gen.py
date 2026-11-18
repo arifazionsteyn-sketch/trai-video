@@ -26,7 +26,7 @@ FORMATS = {
     'indicators': 'технический разбор по индикаторам TRAI прямо сейчас: RSI, EMA 50/200, тренд по таймфреймам, ATR, объём и VWAP — что они вместе говорят о следующем движении и где сценарий ломается',
     'fact': 'малоизвестный, но проверяемый факт о золоте, который меняет взгляд на рынок (центробанки, потоки денег, исторические аналогии с сегодняшней ситуацией по данным TRAI)',
 }
-MODELS = [m for m in os.environ.get('SCRIPT_MODELS', 'gemini-3.5-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-2.5-flash').split(',') if m]
+MODELS = [m for m in os.environ.get('SCRIPT_MODELS', 'gemini-3.8-flash,gemini-3.5-flash,gemini-flash-latest,gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-2.5-flash').split(',') if m]
 
 
 def log(*a): print(*a, flush=True)
@@ -712,7 +712,8 @@ def research_story(hist, avoid_cats):
            '(отчёт, скандал, смена CEO, сделка, суд), движение биткоина или крипто-компаний, нефть, серебро, решения ФРС, инфляция, валюты.\n'
            f'Категория — одна из: {"; ".join(f"{c} — {CATS[c]}" for c in cats)}.\n'
            f'Не повторяй истории и активы прошлых роликов: {"; ".join(recent) or "—"}.\n\n')
-    heads = story_brief()
+    heads = story_brief(); apin = api_news()
+    if apin: heads = 'ПРОВЕРЕННЫЕ НОВОСТИ (Finnhub, Marketaux — дата, издание, заголовок):\n' + fmt_items(apin)[:9000] + '\n\n' + heads
     # 1) Gemini с поиском Google (если ключ это позволяет)
     body = {'contents': [{'role': 'user', 'parts': [{'text': ask + 'Факты проверь поиском Google. Заголовки недели для ориентира:\n' + (heads or '(нет)') + '\n\n' + RESEARCH_FMT}]}],
             'tools': [{'google_search': {}}], 'generationConfig': {'temperature': 0.8, 'maxOutputTokens': 8000}}
@@ -731,7 +732,7 @@ def research_story(hist, avoid_cats):
     pool = []
     for q in ('stock plunges', 'shares soar', 'stock falls after CEO', 'earnings stock reaction', 'bitcoin price', 'crypto market', 'oil prices', 'silver price', 'Federal Reserve rates', 'inflation report markets', 'dollar yen euro'):
         pool += bing_news(q, 8)
-    pool_txt = fmt_items(pool)
+    pool += apin; pool_txt = fmt_items(pool)
     pick_body = {'contents': [{'role': 'user', 'parts': [{'text': ask + 'Выбирай ТОЛЬКО из этих заметок последней недели (дата, издание, заголовок — описание):\n' + pool_txt + '\n\nЗаголовки Google News:\n' + (heads or '(нет)') +
                  '\n\nОтветь JSON: {"category": "...", "asset": "тикер Yahoo", "query": "короткий поисковый запрос по-английски об этой истории", "headline": "заголовок по-русски"}'}]}],
                  'generationConfig': {'temperature': 0.7, 'responseMimeType': 'application/json'}}
@@ -892,6 +893,272 @@ def make_script_story(facts):
         if hits: raise RuntimeError('в сценарии остались слухи/обвинения: ' + ', '.join(hits))
     sc['v'] = 2
     return sc, model
+
+
+# ================= v3: «логическая цепочка» (scene3.html) =================
+# Тема — из проверенных новостей (Finnhub, Marketaux) + поиск Google; сценарий пишет «писатель», затем «редактор» сверяет каждый факт
+# с исследованием, убирает слухи и лишнее и проверяет, что каждая сцена продолжает предыдущую. Картинка — одна «вещь» на мысль.
+def http_json(url, timeout=25, headers=None):
+    with urllib.request.urlopen(urllib.request.Request(url, headers={**UA, **(headers or {})}), timeout=timeout) as r: return json.load(r)
+
+
+def api_news(days=6):
+    # свежие заметки с источником и датой — основа для выбора темы (без ключей — пусто, работает как раньше)
+    out, now = [], datetime.datetime.now(datetime.timezone.utc)
+    since = now - datetime.timedelta(days=days)
+    fk, mk = os.environ.get('FINNHUB_KEY'), os.environ.get('MARKETAUX_KEY')
+    if fk:
+        for cat in ('general', 'crypto', 'merger'):
+            try:
+                for x in http_json(f'https://finnhub.io/api/v1/news?category={cat}&token={fk}')[:40]:
+                    ts = x.get('datetime') or 0
+                    if ts < since.timestamp() or not x.get('headline'): continue
+                    out.append({'title': x['headline'], 'desc': (x.get('summary') or '')[:400], 'date': datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime('%Y-%m-%d'),
+                                'src': x.get('source', ''), 'tickers': [t for t in (x.get('related') or '').split(',') if t][:4]})
+            except Exception as e: log('Finnhub:', cat, e)
+    if mk:
+        for q in ('stock plunges | shares soar | stock tumbles | shares jump', 'earnings | guidance | revenue', 'bitcoin | crypto | ether', 'oil | silver | copper | gold prices',
+                  'Federal Reserve | inflation | treasury yields | jobs report', 'dollar | yen | euro | yuan'):
+            try:
+                j = http_json('https://api.marketaux.com/v1/news/all?' + urllib.parse.urlencode({'search': q, 'language': 'en', 'published_after': since.strftime('%Y-%m-%dT%H:%M'), 'limit': 3, 'api_token': mk}))
+                for x in j.get('data', []):
+                    out.append({'title': x.get('title', ''), 'desc': (x.get('description') or x.get('snippet') or '')[:400], 'date': (x.get('published_at') or '')[:10], 'src': x.get('source', ''),
+                                'tickers': [e.get('symbol') for e in (x.get('entities') or []) if e.get('symbol')][:4]})
+            except Exception as e: log('Marketaux:', e)
+    log('новости из API:', len(out))
+    return out
+
+
+def asset_notes(sym, days=10):
+    # заметки по главному активу: редактор сверяет с ними факты
+    out, fk, mk = [], os.environ.get('FINNHUB_KEY'), os.environ.get('MARKETAUX_KEY')
+    if not sym: return out
+    d0, d1 = (datetime.date.today() - datetime.timedelta(days=days)).isoformat(), datetime.date.today().isoformat()
+    if fk and re.fullmatch(r'[A-Z][A-Z.]{0,5}', sym):
+        try:
+            for x in http_json(f'https://finnhub.io/api/v1/company-news?symbol={sym}&from={d0}&to={d1}&token={fk}')[:20]:
+                out.append({'title': x.get('headline', ''), 'desc': (x.get('summary') or '')[:400], 'date': datetime.datetime.fromtimestamp(x.get('datetime') or 0, datetime.timezone.utc).strftime('%Y-%m-%d'), 'src': x.get('source', '')})
+        except Exception as e: log('Finnhub по активу:', e)
+    if mk:
+        try:
+            ms = sym.replace('-USD', '').replace('^', '') if '=' not in sym else ''
+            if ms:
+                j = http_json('https://api.marketaux.com/v1/news/all?' + urllib.parse.urlencode({'symbols': ms, 'language': 'en', 'published_after': d0, 'limit': 3, 'api_token': mk}))
+                out += [{'title': x.get('title', ''), 'desc': (x.get('description') or '')[:400], 'date': (x.get('published_at') or '')[:10], 'src': x.get('source', '')} for x in j.get('data', [])]
+        except Exception as e: log('Marketaux по активу:', e)
+    return out
+
+
+def logo_file(sym, work):
+    # логотип компании или монеты (Logo.dev, публичный ключ) → файл в папке ролика; путь — относительно шаблона
+    pk = os.environ.get('LOGODEV_PK'); s = (sym or '').upper().strip()
+    if not pk or not s or '=' in s or s.startswith('^'): return None
+    path = ('crypto/' + s.replace('-USD', '').lower()) if s.endswith('-USD') else ('ticker/' + s)
+    out = os.path.join(work, 'logo_' + re.sub(r'[^A-Z0-9]', '_', s) + '.png')
+    if not os.path.exists(out):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f'https://img.logo.dev/{path}?token={pk}&size=160&format=png&retina=true', headers=UA), timeout=15) as r:
+                if 'image' not in (r.headers.get('content-type') or ''): return None
+                open(out, 'wb').write(r.read())
+        except Exception as e: log('логотип', s, e); return None
+    return os.path.relpath(out, HERE)
+
+
+ICON_ENUM = ['gold', 'usd', 'fed', 'btc', 'oil', 'eur', 'cny', 'chart', 'news', 'bank', 'warn']
+TINTS = ['gold', 'blue', 'violet', 'green', 'red', 'teal']
+LT3 = {'type': 'OBJECT', 'required': ['say', 'beats'], 'properties': {
+    'say': TXT(), 'beats': {'type': 'ARRAY', 'items': TXT()}, 'keys': {'type': 'ARRAY', 'items': TXT()},
+    'head': TXT(), 'src': TXT(), 'date': TXT(), 'who': TXT(), 'role': TXT(), 'label': TXT(), 'note': TXT(), 'prefix': TXT(), 'suffix': TXT(),
+    'left': TXT(), 'right': TXT(), 'mark_label': TXT(), 'names': {'type': 'ARRAY', 'items': TXT()},
+    'items': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'properties': {'title': TXT(), 'text': TXT()}}}}}
+SCHEMA3 = {'type': 'OBJECT', 'required': ['topic', 'category', 'asset', 'scenes', 'post'], 'properties': {
+    'topic': TXT(), 'category': {'type': 'STRING', 'enum': list(CATS)}, 'asset': TXT(),
+    'post': {'type': 'OBJECT', 'properties': {l: {'type': 'OBJECT', 'properties': {'caption': TXT(), 'hashtags': TXT()}} for l in LANGS_ALL}},
+    'scenes': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'required': ['type', 'tint', 'ru', 'en', 'uz'], 'properties': {
+        'type': {'type': 'STRING', 'enum': ['news', 'notify', 'quote', 'stat', 'chart', 'list', 'bars', 'calendar', 'scale', 'chain', 'cta']},
+        'tint': {'type': 'STRING', 'enum': TINTS}, 'icon': TXT(), 'icons': {'type': 'ARRAY', 'items': TXT()}, 'dirs': {'type': 'ARRAY', 'items': {'type': 'STRING', 'enum': ['up', 'down', 'none']}},
+        'symbol': TXT(), 'symbols': {'type': 'ARRAY', 'items': TXT()}, 'range': {'type': 'STRING', 'enum': ['5d', '1mo', '3mo', '6mo', '1y']},
+        'mark_date': TXT(), 'level': NUM, 'value': NUM, 'from': NUM, 'decimals': {'type': 'INTEGER'}, 'tone': {'type': 'STRING', 'enum': ['up', 'down', 'none']},
+        'values': {'type': 'ARRAY', 'items': NUM}, 'event_date': TXT(), 'word': TXT(),
+        'ru': LT3, 'en': LT3, 'uz': LT3}}}}}
+
+RULES3 = '''Ты сценарист коротких вертикальных роликов (Shorts, Reels, TikTok) о рынках. Формат — «логическая цепочка», как у лучших русскоязычных каналов:
+сверху — фраза диктора, под ней ОДНА понятная вещь на экране (карточка новости, уведомление, график, большое число, календарь, цепочка).
+Каждая сцена — одна мысль, и она вытекает из предыдущей: «случилось → почему → и тогда → но → что дальше». Зритель не должен ни разу подумать «а это тут при чём».
+
+СТРУКТУРА: 7–9 сцен, 32–42 секунды речи.
+1. Крючок (1-я сцена, 1–2 секунды на чтение): самый сильный факт или число. Не вопрос «знаете ли вы», а утверждение, от которого хочется досмотреть.
+2–3. Что случилось: news (новость с изданием и датой) и/или chart (настоящий график с отметкой события).
+4–6. Почему и к чему привело: chain (2–3 звена), stat, bars, list, quote (официальное заявление со ссылкой).
+7. Поворот: «Но…» — неочевидная деталь из фактов.
+8. Что дальше: calendar (ближайшая дата события) или scale.
+9. cta — кодовое слово в комментариях.
+Подряд не ставь два одинаковых типа. chart — не больше двух раз.
+
+ВЕЩИ НА ЭКРАНЕ (поля сцены общие для всех языков; тексты — в ru/en/uz):
+- news: тексты src (издание), date («17 ноя»), head (суть новости своими словами, до 12 слов). icon — тикер компании (NVDA) или gold/usd/fed/btc/oil/eur/cny/news.
+- notify: icons — 2–3 значка (тикеры или gold/usd/fed/btc/oil/eur/cny/bank/warn); тексты items — 2–3 уведомления {title (кто, до 24 символов), text (что, до 40 символов)}.
+- quote: icon; тексты who (кто сказал), role (должность), head (суть слов, до 14 слов, без кавычек-цитат, которых нет в фактах).
+- stat: value, from (необязательно, «было → стало»), decimals, tone; тексты label (над числом, 1–3 слова), prefix, suffix («$», «%», « млрд $»), note (плашка под карточкой, до 30 символов).
+- chart: symbol (тикер Yahoo Finance), range (5d/1mo/3mo/6mo/1y), mark_date (ГГГГ-ММ-ДД события), level (важная цена, необязательно), tone; тексты label (название, «Nvidia»), mark_label (1–2 слова: «отчёт»). Свечи и % изменения подставятся сами из реальных данных.
+- list: symbols — 2–4 тикера Yahoo (их изменение подставится само); тексты names (короткие названия).
+- bars: values (2–4 числа); тексты items [{title (подпись), text (как показать число: «+12%», «3,2 млрд $»)}].
+- calendar: event_date (ГГГГ-ММ-ДД ближайшего события из фактов), icon; тексты head (что за событие, до 26 символов), note (уточнение, до 34 символов).
+- scale: value, from, decimals; тексты label (что это за число), left и right (подписи краёв шкалы), prefix, suffix.
+- chain: icons (по значку на звено), dirs (up/down/none для каждого звена); тексты items [{title (звено, до 22 символов), text (коротко: «↑ 5%», «крепнет»)}].
+- cta: word — одно кодовое слово латиницей заглавными (тикер или тема: NVDA, BTC, OIL, FED); тексты say «Напиши NVDA в комментариях — пришлю разбор.» (на нужном языке).
+tint — цвет света сцены по смыслу: red — падение, green — рост, blue — макро и ставки, violet — технологии и компании, gold — золото и сырьё, teal — крипта.
+
+ТЕКСТЫ (ru, en, uz — узбекский латиницей, современный):
+- say — что говорит диктор: одно предложение, 6–16 слов. Весь русский текст 75–100 слов, английский 70–95, узбекский 60–85.
+  Разговорно и живо. Каждая фраза связана с предыдущей словами-связками («из-за этого», «и тогда», «но», «а значит»). Ни одной лишней детали: если факт не двигает историю — выкинь.
+  Числа цифрами, проценты «12%». Не пиши значок $ и сокращения (млн, млрд) в say — «75 тысяч долларов», «1,3 миллиарда долларов».
+- beats — 1–3 слова ИЗ say этой сцены (точно как в тексте), на которых появляется следующий элемент (уведомление, звено, бейдж). Для одиночной вещи — 1–2 слова.
+- keys — 1 слово из say для цветной подсветки (главное слово фразы).
+- Надписи на карточках — на языке ролика; переводы естественные, те же цифры.
+
+ФАКТЫ И ТОН:
+- Только факты и цифры из исследования ниже. Чего нет — не пиши. Даты и цены точно как в фактах.
+- О людях и компаниях — только сообщённое изданиями, со ссылкой. Никаких слухов, обвинений, личной жизни, «предполагаемых» связей, арестов и расследований против людей.
+- Политика — нейтрально, только влияние на рынок. Не финансовый совет: без «покупайте/продавайте».
+- Без шаблонов: «друзья», «давайте разберём», «важно понимать», «подписывайтесь».
+topic — заголовок по-русски; category и asset (главный тикер) — из исследования.
+post — подпись для соцсетей на каждом языке (2–3 предложения, без хэштегов, без ссылок и упоминания бота) и hashtags (5–8 штук).'''
+
+EDITOR3 = '''Ты строгий главный редактор финансовых роликов. Ниже сценарий и исследование с фактами. Верни исправленный сценарий — тот же JSON и та же схема.
+Проверь и исправь:
+1. ФАКТЫ: каждое число, дата, название и утверждение в say и на карточках должно быть в исследовании или заметках. Если нет — замени фактом из исследования или убери сцену.
+2. СЛУХИ: никаких обвинений, расследований против людей, личной жизни, «предполагаемых» связей, шпионажа, арестов — на любом языке. Только рынок: цены, решения, отчёты, официальные заявления.
+3. ЦЕПОЧКА: каждая сцена продолжает предыдущую (что → почему → и тогда → но → что дальше). Нет прыжков и повторов. Если связи нет — добавь связку в say или переставь сцены.
+4. КРЮЧОК: первая фраза — самый сильный факт, 6–12 слов, без вступлений.
+5. ЛИШНЕЕ: выкинь детали, которые не двигают историю. Каждая фраза say — 6–16 слов; весь русский текст 75–100 слов.
+6. ДАННЫЕ СЦЕН: у каждой сцены заполнены поля для её типа (у chart — symbol, у stat — value, у chain — items, у calendar — event_date и т.д.). Если данных нет в фактах — смени тип сцены.
+7. beats и keys — слова, которые точно есть в say этой сцены.
+8. Узбекский — латиницей, современный и естественный; английский — естественный.'''
+
+
+def make_script3(facts):
+    gc = {'temperature': 0.8, 'maxOutputTokens': 24000, 'responseMimeType': 'application/json', 'responseSchema': SCHEMA3}
+    def parse(t):
+        j = json.loads(t.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
+        if isinstance(j, list) and j and isinstance(j[0], dict): j = j[0]
+        if isinstance(j, dict) and 'scenes' not in j: j = next((v for v in j.values() if isinstance(v, dict) and 'scenes' in v), j)
+        return j if isinstance(j, dict) else {}
+    sc, model = None, ''
+    for att in range(3):  # писатель
+        try:
+            txt, c, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': RULES3 + ('' if not att else '\n\nВАЖНО: 7–9 сцен, от крючка до cta.') + '\n\nИССЛЕДОВАНИЕ:\n' + facts}]}], 'generationConfig': gc}, timeout=240)
+            got = parse(txt)
+            if len(got.get('scenes') or []) >= 5: sc = got; break
+            log(f'сценарий v3 короткий (попытка {att + 1}, {model})')
+        except Exception as e: log(f'сценарий v3, попытка {att + 1}: {e}')
+        time.sleep(10)
+    if not sc: raise RuntimeError('слишком короткий сценарий')
+    bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
+    for att in range(2):  # редактор: факты, слухи, цепочка, длина
+        try:
+            t2, _, m2 = gemini({'contents': [{'role': 'user', 'parts': [{'text': EDITOR3 + '\n\nСЦЕНАРИЙ:\n' + json.dumps(sc, ensure_ascii=False) + '\n\nИССЛЕДОВАНИЕ:\n' + facts}]}],
+                                'generationConfig': {**gc, 'temperature': 0.3}}, timeout=240)
+            ed = parse(t2)
+            if len(ed.get('scenes') or []) >= 5: sc = ed; model += f' → редактор {m2}'
+        except Exception as e: log('редактор:', e)
+        hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
+        wl = sum(len((x.get('ru') or {}).get('say', '').split()) for x in sc['scenes'])
+        if not hits and wl <= 110: break
+        log('после редактора ещё правки:', hits, wl, 'слов')
+    hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
+    if hits: raise RuntimeError('в сценарии остались слухи/обвинения: ' + ', '.join(hits))
+    sc['v'] = 3
+    return sc, model
+
+
+MON = {'ru': ['ЯНВАРЬ', 'ФЕВРАЛЬ', 'МАРТ', 'АПРЕЛЬ', 'МАЙ', 'ИЮНЬ', 'ИЮЛЬ', 'АВГУСТ', 'СЕНТЯБРЬ', 'ОКТЯБРЬ', 'НОЯБРЬ', 'ДЕКАБРЬ'],
+       'en': ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'],
+       'uz': ['YANVAR', 'FEVRAL', 'MART', 'APREL', 'MAY', 'IYUN', 'IYUL', 'AVGUST', 'SENTABR', 'OKTABR', 'NOYABR', 'DEKABR']}
+
+
+def scene_data3(s, L, script, work, logos):
+    t = s.get(L) or {}; ty = s.get('type') or 'stat'
+    g = lambda k, dflt='': t.get(k) if t.get(k) not in (None, '') else dflt
+    sym = (s.get('symbol') or script.get('asset') or '').strip()
+    def ic(v):  # значок: тикер с логотипом или встроенный символ
+        v = (v or '').strip()
+        if v.lower() in ICON_ENUM: return v.lower()
+        if v and v.upper() not in logos:
+            f = logo_file(v, work)
+            if f: logos[v.upper()] = f
+        return v.upper() or 'news'
+    d = {'type': ty, 'tint': s.get('tint') if s.get('tint') in TINTS else 'gold', 'v': {}}
+    v = d['v']
+    if ty == 'news': v.update(src=g('src') or s.get('source_name', ''), head=g('head'), date=g('date')); d['icon'] = ic(s.get('icon') or sym)
+    elif ty == 'notify':
+        icons = s.get('icons') or []
+        v['items'] = [{'icon': ic(icons[i] if i < len(icons) else 'news'), 'title': it.get('title', ''), 'text': it.get('text', '')} for i, it in enumerate(t.get('items') or [])][:3]
+    elif ty == 'quote': v.update(who=g('who'), role=g('role'), text=g('head'), icon=ic(s.get('icon') or 'news'))
+    elif ty == 'stat':
+        val = s.get('value')
+        v.update(value=val or 0, decimals=s.get('decimals') or (0 if val is None or float(val).is_integer() else 1), prefix=g('prefix'), suffix=g('suffix'), label=g('label'), note=g('note'), tone=s.get('tone') or 'none')
+        if s.get('from') is not None: v['from'] = s['from']
+    elif ty == 'scale':
+        val = s.get('value') or 0
+        v.update(value=val, decimals=s.get('decimals') or (0 if float(val).is_integer() else 1), prefix=g('prefix'), suffix=g('suffix'), label=g('label'), left=g('left'), right=g('right'))
+        if s.get('from') is not None: v['from'] = s['from']
+    elif ty == 'chart':
+        rng = s.get('range') or '1mo'; iv = '1h' if rng == '5d' else '1wk' if rng == '1y' else '1d'
+        qq = quotes(sym, rng, iv) if sym else None
+        if qq and len(qq['bars']) >= 5:
+            bars = agg(qq['bars'], 44); chg = (bars[-1][4] / bars[0][1] - 1) * 100
+            v.update(sym=sym.replace('-USD', '').replace('=F', '').replace('^', ''), name=g('label'), period=PERIOD[L][rng], candles=[[round(b[1], 4), round(b[2], 4), round(b[3], 4), round(b[4], 4)] for b in bars],
+                     badge=('+' if chg >= 0 else '−') + f'{abs(chg):.1f}%'.replace('.', ',' if L != 'en' else '.'), tone='up' if chg >= 0 else 'down', icon=ic(sym), markLabel=g('mark_label'),
+                     dec=2 if bars[-1][4] < 50 else 0)
+            if s.get('mark_date'):
+                try:
+                    md = datetime.datetime.strptime(s['mark_date'][:10], '%Y-%m-%d').replace(tzinfo=datetime.timezone.utc).timestamp()
+                    if bars[0][0] <= md + 86399 and md <= bars[-1][0] + 2 * 86400: v['mark'] = max([i for i, b in enumerate(bars) if b[0] <= md + 86399] or [0])
+                except Exception: pass
+            lo, hi = min(b[3] for b in bars), max(b[2] for b in bars)
+            if isinstance(s.get('level'), (int, float)) and lo - (hi - lo) * 0.3 <= s['level'] <= hi + (hi - lo) * 0.3: v['level'] = s['level']
+        elif s.get('value') is not None: d['type'] = 'stat'; v.update(value=s['value'], decimals=s.get('decimals') or 0, label=g('label'), prefix=g('prefix'), suffix=g('suffix'))
+        else: d['type'] = 'news'; v.update(src=g('label') or sym, head=g('mark_label') or script.get('topic', ''), date=''); d['icon'] = ic(sym)
+    elif ty == 'list':
+        rows, names = [], t.get('names') or []
+        for i, sy in enumerate((s.get('symbols') or [])[:4]):
+            qq = quotes(sy, s.get('range') or '5d', '1h' if (s.get('range') or '5d') == '5d' else '1d')
+            if not qq: continue
+            b = qq['bars']; rows.append({'sym': sy.replace('-USD', '').replace('=F', '').replace('^', ''), 'icon': ic(sy), 'name': names[i] if i < len(names) else '',
+                                         'chg': round((b[-1][4] / b[0][1] - 1) * 100, 2), 'line': [round(x[4], 4) for x in b][-40:]})
+        v['rows'] = rows
+    elif ty == 'bars':
+        vals = s.get('values') or []
+        v['rows'] = [{'label': it.get('title', ''), 'txt': it.get('text', ''), 'v': vals[i] if i < len(vals) else 0, 'tone': 'down' if (vals[i] if i < len(vals) else 0) < 0 else 'up'} for i, it in enumerate(t.get('items') or [])][:4]
+    elif ty == 'calendar':
+        try:
+            dd = datetime.datetime.strptime((s.get('event_date') or '')[:10], '%Y-%m-%d'); v.update(month=f'{MON[L][dd.month - 1]} {dd.year}', day=str(dd.day))
+        except Exception: d['type'] = 'news'; v.update(src='', head=g('head'), date=g('note'))
+        v.update(note=g('head'), sub=g('note'), icon=ic(s.get('icon') or 'news'))
+    elif ty == 'chain':
+        icons, dirs = s.get('icons') or [], s.get('dirs') or []
+        v['items'] = [{'icon': ic(icons[i] if i < len(icons) else 'news'), 'text': it.get('title', ''), 'chgTxt': it.get('text', ''),
+                       **({'chg': 1 if dirs[i] == 'up' else -1} if i < len(dirs) and dirs[i] in ('up', 'down') else {})} for i, it in enumerate(t.get('items') or [])][:3]
+    elif ty == 'cta':
+        k, c = CTA_TXT[L]; v.update(word=re.sub(r'[^A-Z0-9]', '', str(s.get('word') or g('label') or script.get('asset') or 'TRAI').upper())[:8] or 'TRAI', note=c)
+    # пустая вещь — не показываем пустой экран
+    if (d['type'] in ('notify', 'chain') and not v.get('items')) or (d['type'] in ('list', 'bars') and not v.get('rows')) or (d['type'] == 'news' and not v.get('head')):
+        d['type'] = 'stat' if s.get('value') is not None else 'news'
+        if d['type'] == 'stat': v.update(value=s['value'], decimals=s.get('decimals') or 0, label=g('label'), prefix=g('prefix'), suffix=g('suffix'))
+        else: v.update(src=g('src') or script.get('asset', ''), head=g('head') or t.get('say', ''), date=g('date'))
+    if d.get('icon'): v['icon'] = d.pop('icon')
+    return d
+
+
+def phrases(words):
+    # фраза сверху: целое предложение (до 8 слов), разрыв — на точке, паузе или 8-м слове
+    res, cur = [], []
+    for i, (wd, t) in enumerate(words):
+        cur.append([wd, round(t, 3)]); nxt = words[i + 1][1] if i + 1 < len(words) else None
+        if nxt is None or re.search(r'[.!?…]$', wd) or len(cur) >= 8 or (nxt - t > 0.8) or (len(cur) >= 5 and re.search(r'[,:;—]$', wd)):
+            res.append({'w': cur}); cur = []
+    return res
 
 
 # ---------- Котировки: Yahoo Finance (без ключа) → Gate (крипта) → Stooq ----------
@@ -1095,18 +1362,24 @@ def make_video(script, L, idx, stamp, mock=False):
             if i < len(parts) - 1: vv.append(np.zeros(int(gap * SR))); t += gap
         voice = np.concatenate(vv)
     # 2) таймлайн: сцена начинается с её первого слова, субтитры — по словам внутри сцены
-    scenes, subs, v2 = [], [], script.get('v') == 2
+    v3 = script.get('v') == 3; scenes, subs, v2, logos = [], [], script.get('v') in (2, 3), {}
     for i, s in enumerate(sc):
         ws = [[w, t_] for w, t_, k in tok_scene if k == i]
-        d = scene_data2(s, L, script) if v2 else scene_data(s, L, work); st = ws[0][1] if ws else (scenes[-1]['start'] + 2.5 if scenes else 0.3)
+        d = scene_data3(s, L, script, work, logos) if v3 else scene_data2(s, L, script) if v2 else scene_data(s, L, work); st = ws[0][1] if ws else (scenes[-1]['start'] + 2.5 if scenes else 0.3)
         d['start'] = 0.0 if i == 0 else round(max(st - (0.18 if v2 else 0.12), scenes[-1]['start'] + 0.8), 3)
         if v2: d['beats'] = beat_times(ws, (s.get(L) or {}).get('beats') or [])
-        scenes.append(d); subs += chunks(ws, s[L].get('keys') or [])
+        scenes.append(d)
+        if v3:  # фраза сверху целиком, главное слово — цветом
+            keyset = {norm(k) for k in (s[L].get('keys') or []) for k in k.split()}
+            for ph in phrases(ws): ph['key'] = next((j for j, (w, _) in enumerate(ph['w']) if norm(w) in keyset), -1); subs.append(ph)
+        else: subs += chunks(ws, s[L].get('keys') or [])
     t = len(voice) / SR
-    outro = round(max(t + 0.5, 28.0), 3); total = round(outro + (2.3 if v2 else 2.0), 3)  # ролик не короче 30 с
+    outro = round(max(t + (0.7 if v3 else 0.5), 20.0 if v3 else 28.0), 3); total = round(outro + (2.3 if v2 else 2.0), 3)  # v2 — не короче 30 с
     for i, d in enumerate(scenes): d['end'] = scenes[i + 1]['start'] if i + 1 < len(scenes) else outro
     beats = [] if v2 else [c['w'][c['key']][1] for c in subs if c.get('key', -1) >= 0]
-    job = {'template': 'scene2.html' if v2 else 'scene.html', 'lang': L, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': (DISCLAIMER_SHORT if v2 else DISCLAIMER)[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
+    if v3:  # без ника и полоски прогресса — так ролик лучше попадает в рекомендации
+        job = {'template': 'scene3.html', 'lang': L, 'tagline': TAGLINE[L], 'disclaimer': DISCLAIMER_SHORT[L], 'logos': logos, 'scenes': scenes, 'subs': subs, 'outro': outro, 'total': total}
+    else: job = {'template': 'scene2.html' if v2 else 'scene.html', 'lang': L, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': (DISCLAIMER_SHORT if v2 else DISCLAIMER)[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
     jp = os.path.join(work, 'job.json'); json.dump(job, open(jp, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     v = np.concatenate([voice, np.zeros(max(0, int(total * SR) - len(voice)))])[:int(total * SR)]
     with wave.open(os.path.join(work, 'voice.wav'), 'wb') as w:
@@ -1177,6 +1450,7 @@ def main():
     ap.add_argument('--count', type=int, default=1); ap.add_argument('--langs', default='ru,en,uz'); ap.add_argument('--formats', default='')
     ap.add_argument('--mode', default='story', choices=['story', 'gold'])  # story — истории любого рынка за неделю; gold — старые темы про золото
     ap.add_argument('--mock', action='store_true')
+    ap.add_argument('--style', default=os.environ.get('VIDEO_STYLE') or 'v3', choices=['v2', 'v3'])  # v3 — «логическая цепочка» (scene3.html)
     a = ap.parse_args(); langs = [l for l in a.langs.split(',') if l in LANGS_ALL]
     os.makedirs(OUTDIR, exist_ok=True)
     hist = json.load(open(HIST, encoding='utf-8')) if os.path.exists(HIST) else []
@@ -1200,7 +1474,12 @@ def main():
                     avoid = set(cats_run) | {h.get('category') for h in hist[-2:] if h.get('category')}
                     facts, src, m1, cat = research_story(hist, avoid); log('история/факты:', m1, facts[:500].replace('\n', ' '))
                     cats_run.append(cat)  # даже если сценарий не выйдет, запасная тема возьмёт другую категорию
-                    script, m2 = make_script_story(facts); models = f'{m1}, {m2}'
+                    if a.style == 'v3':
+                        am = re.search(r'АКТИВ[^\n]*?\(?\b([A-Z]{1,5}(?:-USD|=[FX])?|\^[A-Z]+)\b', facts); an = asset_notes(am.group(1)) if am else []
+                        if an: facts += '\n\nЗАМЕТКИ ПО АКТИВУ (Finnhub, Marketaux):\n' + fmt_items(an); src = list(dict.fromkeys(src + [x['src'] for x in an if x['src']]))[:10]
+                        script, m2 = make_script3(facts)
+                    else: script, m2 = make_script_story(facts)
+                    models = f'{m1}, {m2}'
                     script['category'] = script.get('category') or cat
                     json.dump({'facts': facts, 'sources': src, 'script': script}, open(os.path.join(OUTDIR, f'script_{stamp}_{n}.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
                 cats_run.append(script.get('category') or '')

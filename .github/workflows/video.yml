@@ -1,4 +1,4 @@
-# TRAI — ролики «истории рынка»: история недели (Gemini + поиск Google) → сценарий RU/EN/UZ → голос Gemini → кадры scene2.html → эффекты → Telegram.
+# TRAI — ролики «истории рынка»: история недели (Finnhub, Marketaux + поиск Google) → сценарий (писатель + редактор) RU/EN/UZ → голос Gemini → кадры scene3.html → эффекты → Telegram.
 # Расписание: каждый день 2 истории × 3 языка. Разовый запуск: изменить video/run.json (count, langs, mode: story | gold) и сохранить (commit),
 # или кнопка «Run workflow».
 name: video
@@ -51,6 +51,10 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FINNHUB_KEY: ${{ secrets.FINNHUB_KEY }}
+          MARKETAUX_KEY: ${{ secrets.MARKETAUX_KEY }}
+          LOGODEV_PK: ${{ secrets.LOGODEV_PK }}
+          VIDEO_STYLE: ${{ vars.VIDEO_STYLE }}
           GEMINI_VOICE: ${{ vars.GEMINI_VOICE }}
           GEMINI_VOICE_RU: ${{ vars.GEMINI_VOICE_RU }}
           GEMINI_VOICE_EN: ${{ vars.GEMINI_VOICE_EN }}

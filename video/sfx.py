@@ -41,6 +41,10 @@ def boom(dur=1.4):
 for s in job['scenes'][1:]:
     place(woosh, s['start'] - 0.16, 0.14)
 place(woosh, OUT - 0.16, 0.14)
+# v3 (scene3.html): мягкий «пак» на каждом появлении вещи — на ударах сцены
+if job.get('template') == 'scene3.html':
+    for s in job['scenes']:
+        for i, b in enumerate((s.get('beats') or [s['start'] + 0.15])[:3]): place(pac2 if i else pac, b + 0.05, 0.08 if i else 0.09, [-0.25, 0.25, 0][i % 3])
 # появление главной цифры/карточки в сцене
 for k, s in enumerate(job['scenes']):
     d = s['end'] - s['start']
