@@ -343,9 +343,9 @@ def tts_eleven(text, lang, path):
 # ---------- Озвучка Gemini TTS (бесплатный ключ): весь текст одним куском, выразительно; время слов — Whisper ----------
 TTS_MODELS = [m for m in (os.environ.get('TTS_MODELS') or 'gemini-3.8-flash-lite-tts,gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts').split(',') if m]
 STYLE = {
-    'ru': 'Ты рассказчик популярного канала о рынках. Говори по-русски низким, мужественным, уверенным голосом — спокойно, но живо, как будто рассказываешь другу интересную историю: с интонацией, без монотонности и без крика. Первую фразу — с лёгким напряжением, чтобы зацепить. Перед главной цифрой и на тире — короткая пауза, саму цифру — чуть выделить. Темп ровный, не тараторь. Очень чёткая дикция: каждое слово и каждую цифру произноси полностью, с первого звука. Между строками — пауза. Читай ТОЛЬКО текст пользователя, ничего не добавляй.',
-    'en': 'You are the narrator of a popular markets channel. Speak English in a low, masculine, confident voice — calm but alive, like telling a friend a gripping story: natural intonation, never monotone, never shouting. Give the first line a touch of tension to hook the listener. Brief pause before key numbers and at dashes, and lean slightly on the number itself. Steady pace, never rushed. Crisp diction: pronounce every word fully from its first sound. Pause between lines. Read ONLY the user text, add nothing.',
-    'uz': "Siz bozorlar haqidagi mashhur kanal hikoyachisisiz. O'zbek tilida past, erkakcha, ishonchli ovozda gapiring — xotirjam, lekin jonli, do'stingizga qiziqarli voqeani aytib berayotgandek: intonatsiya bilan, bir xil ohangda emas. Birinchi gapni biroz taranglik bilan ayting. Muhim raqamdan oldin va tire belgisida qisqa pauza qiling. Shoshilmang. Har bir so'zni birinchi tovushidan boshlab aniq talaffuz qiling. Satrlar orasida pauza. FAQAT foydalanuvchi matnini o'qing, hech narsa qo'shmang.",
+    'ru': 'Ты рассказчик популярного канала о рынках. Говори по-русски низким, мужественным, уверенным голосом — спокойно, но живо, как будто рассказываешь другу интересную историю: с интонацией, без монотонности и без крика. Первую фразу — с лёгким напряжением, чтобы зацепить. Темп быстрый и энергичный, как у ведущих коротких роликов: на запятых НЕ останавливайся, читай фразу на одном дыхании; короткая пауза — только на точке. Главную цифру чуть выдели голосом, без паузы перед ней. Очень чёткая дикция: каждое слово и каждую цифру произноси полностью, с первого звука. Между строками — короткая пауза. Читай ТОЛЬКО текст пользователя, ничего не добавляй.',
+    'en': 'You are the narrator of a popular markets channel. Speak English in a low, masculine, confident voice — calm but alive, like telling a friend a gripping story: natural intonation, never monotone, never shouting. Give the first line a touch of tension to hook the listener. Fast, energetic pace like top short-form narrators: do NOT stop at commas, read each sentence in one breath; brief pause only at periods. Lean slightly on key numbers without pausing before them. Crisp diction: pronounce every word fully from its first sound. Short pause between lines. Read ONLY the user text, add nothing.',
+    'uz': "Siz bozorlar haqidagi mashhur kanal hikoyachisisiz. O'zbek tilida past, erkakcha, ishonchli ovozda gapiring — xotirjam, lekin jonli, do'stingizga qiziqarli voqeani aytib berayotgandek: intonatsiya bilan, bir xil ohangda emas. Birinchi gapni biroz taranglik bilan ayting. Tez va jonli sur'atda gapiring, qisqa videolar boshlovchilari kabi: vergulda TO'XTAMANG, har bir gapni bir nafasda o'qing; qisqa pauza faqat nuqtada. Muhim raqamni ovoz bilan biroz ajrating, oldidan pauza qilmang. Har bir so'zni birinchi tovushidan boshlab aniq talaffuz qiling. Satrlar orasida qisqa pauza. FAQAT foydalanuvchi matnini o'qing, hech narsa qo'shmang.",
 }
 
 
@@ -355,6 +355,28 @@ STYLE = {
 # ru — Fenrir на gemini-3.8-flash-lite-tts (не запинается), манера — спокойнее, как у английского
 VOICE_DEFAULT = {'ru': 'Fenrir', 'en': 'Algenib', 'uz': 'Fenrir'}
 MODEL_DEFAULT = {'ru': 'gemini-3.8-flash-lite-tts', 'en': 'gemini-3.1-flash-tts-preview', 'uz': 'gemini-3.8-flash-lite-tts'}
+
+
+def tighten(a, max_gap=0.16, tempo=1.0, work=None):
+    # паузы длиннее max_gap (запятые, переходы между строками) укорачиваем до max_gap; затем — ускорение без изменения высоты голоса
+    win = int(0.01 * SR); n = len(a) // win
+    if n < 10: return a
+    rms = np.sqrt(np.mean(a[:n * win].reshape(n, win) ** 2, axis=1)); thr = max(np.percentile(rms, 95) * 0.06, 0.003)
+    sil = rms < thr; keep = int(max_gap / 0.01); out, i, cut = [], 0, 0.0
+    while i < n:
+        j = i
+        while j < n and sil[j] == sil[i]: j += 1
+        seg = a[i * win:j * win]
+        if sil[i] and j - i > keep and 0 < i and j < n:
+            h = keep * win // 2; seg = np.concatenate([seg[:h], seg[-h:]]); cut += (j - i - keep) * 0.01
+        out.append(seg); i = j
+    b = np.concatenate(out + [a[n * win:]])
+    if tempo > 1.001 and work:
+        tmp, dst = os.path.join(work, 'vo_t0.wav'), os.path.join(work, 'vo_t1.wav')
+        with wave.open(tmp, 'wb') as w: w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes((np.clip(b, -1, 1) * 32767).astype('<i2').tobytes())
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', tmp, '-filter:a', f'atempo={tempo:.3f}', '-ar', str(SR), '-ac', '1', dst], check=True); b = read_wav(dst)
+    log(f'паузы короче на {cut:.1f} с, темп ×{tempo:.2f} → {len(b) / SR:.1f} с')
+    return b
 
 
 def tts_gemini_whole(lines, lang, path):
@@ -984,23 +1006,29 @@ SCHEMA3 = {'type': 'OBJECT', 'required': ['topic', 'category', 'asset', 'scenes'
 
 RULES3 = '''Ты сценарист коротких вертикальных роликов (Shorts, Reels, TikTok) о рынках. Формат — «логическая цепочка», как у лучших русскоязычных каналов:
 сверху — фраза диктора, под ней ОДНА понятная вещь на экране (карточка новости, уведомление, график, большое число, календарь, цепочка).
-Каждая сцена — одна мысль, и она вытекает из предыдущей: «случилось → почему → и тогда → но → что дальше». Зритель не должен ни разу подумать «а это тут при чём».
+Каждая сцена — одна мысль, и она вытекает из предыдущей: «случилось → почему → и тогда → но → что это значит → что дальше». Зритель не должен ни разу подумать «а это тут при чём».
+ЗРИТЕЛЬ — обычный человек, не трейдер. Ролик должен понять школьник и его родители:
+- каждый термин объясни на лету тремя-пятью словами («Brent — главный сорт нефти в мире», «ФРС — центробанк США», «ставка — цена денег в долг»);
+- каждую причину объясни через простую механику («нефти добывают больше, чем покупают, — и она дешевеет»);
+- обязательно одна сцена «что это значит для тебя»: бензин, цены в магазинах, доллар, сбережения, ипотека — только то, что прямо следует из фактов;
+- без воды: каждая фраза либо новый факт, либо объяснение. Никаких «интересно, что», «стоит отметить», «на этом фоне», «ситуация остаётся напряжённой».
 
-СТРУКТУРА: 7–9 сцен, 32–42 секунды речи.
+СТРУКТУРА: 8–10 сцен, 38–48 секунд речи (диктор читает бодро).
 1. Крючок (1-я сцена, 1–2 секунды на чтение): самый сильный факт или число. Не вопрос «знаете ли вы», а утверждение, от которого хочется досмотреть.
 2–3. Что случилось: news (новость с изданием и датой) и/или chart (настоящий график с отметкой события).
 4–6. Почему и к чему привело: chain (2–3 звена), stat, bars, list, quote (официальное заявление со ссылкой).
 7. Поворот: «Но…» — неочевидная деталь из фактов.
-8. Что дальше: calendar (ближайшая дата события) или scale.
-9. cta — кодовое слово в комментариях.
+8. Что это значит для обычного человека (stat, chain или bars).
+9. Что дальше: calendar (ближайшая дата события) или scale.
+10. cta — кодовое слово в комментариях.
 Подряд не ставь два одинаковых типа. chart и stat — каждый не больше двух раз; минимум 5 разных типов в ролике. Если есть тикер с историей цен — хотя бы один chart или list.
 
-ВЕЩИ НА ЭКРАНЕ (поля сцены общие для всех языков; тексты — в ru/en/uz):
-- news: тексты src (издание), date («17 ноя»), head (суть новости своими словами, до 12 слов). icon — тикер компании (NVDA) или gold/usd/fed/btc/oil/eur/cny/news.
+ВЕЩИ НА ЭКРАНЕ (поля сцены общие для всех языков; тексты — в ru/en/uz). Текст на карточке НЕ дублирует речь диктора: карточка — заголовок, число, имя, дата; диктор — объяснение.
+- news: тексты src (издание — ОБЯЗАТЕЛЬНО, как в фактах: Reuters, Bloomberg, CNBC…), date («17 ноя»), head (заголовок новости, до 10 слов — НЕ повторяй say, а дай короткий газетный заголовок). icon — тикер компании (NVDA) или gold/usd/fed/btc/oil/eur/cny/news.
 - notify: icons — 2–3 значка (тикеры или gold/usd/fed/btc/oil/eur/cny/bank/warn); тексты items — 2–3 уведомления {title (кто, до 24 символов), text (что, до 40 символов)}.
 - quote: icon; тексты who (кто сказал), role (должность), head (суть слов, до 14 слов, без кавычек-цитат, которых нет в фактах).
 - stat: value, from (необязательно, «было → стало»), decimals, tone; тексты label (над числом, 1–3 слова), prefix, suffix («$», «%», « млрд $»), note (плашка под карточкой, до 30 символов).
-- chart: symbol (тикер Yahoo Finance), range (5d/1mo/3mo/6mo/1y), mark_date (ГГГГ-ММ-ДД события), level (важная цена, необязательно), tone; тексты label (название, «Nvidia»), mark_label (1–2 слова: «отчёт»). Свечи и % изменения подставятся сами из реальных данных.
+- chart: symbol (тикер Yahoo Finance), range (5d/1mo/3mo/6mo/1y), mark_date (ГГГГ-ММ-ДД события), level (важная цена, необязательно), tone, value и decimals (последняя цена или % изменения из фактов — запасной вариант, если котировок не будет); тексты prefix/suffix для value; тексты label (название, «Nvidia»), mark_label (1–2 слова: «отчёт»). Свечи и % изменения подставятся сами из реальных данных.
 - list: symbols — 2–4 тикера Yahoo (их изменение подставится само); тексты names (короткие названия).
 - bars: values (2–4 числа); тексты items [{title (подпись), text (как показать число: «+12%», «3,2 млрд $»)}].
 - calendar: event_date (ГГГГ-ММ-ДД ближайшего события из фактов), icon; тексты head (что за событие, до 26 символов), note (уточнение, до 34 символов).
@@ -1011,7 +1039,7 @@ tint — цвет света сцены по смыслу: red — падени�
 
 ТЕКСТЫ (ru, en, uz — узбекский латиницей, современный):
 - say — что говорит диктор: одно предложение, 6–16 слов. ЧИСЛА В РЕЧИ — КРУГЛЫЕ И ПРОСТЫЕ: «почти 104 пункта», «около 3900 долларов», «на 19%», «92 процента».
-  Никогда не произноси дроби вроде «103,69» или «0,4 процента» — точное число покажи на карточке (stat, chart). Названия бирж, сайтов и изданий в say не произноси — издание пиши на карточке news. Весь русский текст 75–100 слов, английский 70–95, узбекский 60–85.
+  Никогда не произноси дроби вроде «103,69» или «0,4 процента» — точное число покажи на карточке (stat, chart). Названия бирж, сайтов и изданий в say не произноси — издание пиши на карточке news. Весь русский текст 95–120 слов, английский 90–115, узбекский 80–100.
   Разговорно и живо. Каждая фраза связана с предыдущей словами-связками («из-за этого», «и тогда», «но», «а значит»). Ни одной лишней детали: если факт не двигает историю — выкинь.
   Числа цифрами, проценты «12%». Не пиши значок $ и сокращения (млн, млрд) в say — «75 тысяч долларов», «1,3 миллиарда долларов».
 - beats — 1–3 слова ИЗ say этой сцены (точно как в тексте), на которых появляется следующий элемент (уведомление, звено, бейдж). Для одиночной вещи — 1–2 слова.
@@ -1032,7 +1060,8 @@ EDITOR3 = '''Ты строгий главный редактор финансо�
 2. СЛУХИ: никаких обвинений, расследований против людей, личной жизни, «предполагаемых» связей, шпионажа, арестов — на любом языке. Только рынок: цены, решения, отчёты, официальные заявления.
 3. ЦЕПОЧКА: каждая сцена продолжает предыдущую (что → почему → и тогда → но → что дальше). Нет прыжков и повторов. Если связи нет — добавь связку в say или переставь сцены.
 4. КРЮЧОК: первая фраза — самый сильный факт, 6–12 слов, без вступлений.
-5. ЛИШНЕЕ: выкинь детали, которые не двигают историю. Каждая фраза say — 6–16 слов; весь русский текст 75–100 слов.
+5. ЛИШНЕЕ И ПОНЯТНОСТЬ: выкинь воду и детали, которые не двигают историю. Каждый термин объяснён простыми словами, есть сцена «что это значит для обычного человека». Каждая фраза say — 6–16 слов; весь русский текст 95–120 слов.
+11. КАРТОЧКИ: head у news — короткий заголовок (до 10 слов), не копия say; src у news заполнен изданием; у quote есть who и head; у chart есть value на случай, если графика не будет.
 6. ДАННЫЕ СЦЕН: у каждой сцены заполнены поля для её типа (у chart — symbol, у stat — value, у chain — items, у calendar — event_date и т.д.). Если данных нет в фактах — смени тип сцены.
 7. beats и keys — слова, которые точно есть в say этой сцены.
 9. РЕЧЬ: числа в say круглые и простые («почти 104 пункта», «около 3900 долларов»); дробей вроде «103,69» в речи нет — точное число остаётся на карточке. Названий бирж, сайтов и изданий в say нет.
@@ -1086,6 +1115,8 @@ def scene_data3(s, L, script, work, logos):
     sym = (s.get('symbol') or script.get('asset') or '').strip()
     def ic(v):  # значок: тикер с логотипом или встроенный символ
         v = (v or '').strip()
+        v = {'BZ=F': 'oil', 'CL=F': 'oil', 'GC=F': 'gold', 'SI=F': 'gold', 'DX-Y.NYB': 'usd', 'EURUSD=X': 'eur', 'CNY=X': 'cny', '^GSPC': 'chart', '^IXIC': 'chart', '^DJI': 'chart'}.get(v.upper(), v)
+        if '=' in v or v.startswith('^'): return 'chart'
         if v.lower() in ICON_ENUM: return v.lower()
         if v and v.upper() not in logos:
             f = logo_file(v, work)
@@ -1093,7 +1124,7 @@ def scene_data3(s, L, script, work, logos):
         return v.upper() or 'news'
     d = {'type': ty, 'tint': s.get('tint') if s.get('tint') in TINTS else 'gold', 'v': {}}
     v = d['v']
-    if ty == 'news': v.update(src=g('src') or s.get('source_name', ''), head=g('head'), date=g('date')); d['icon'] = ic(s.get('icon') or sym)
+    if ty == 'news': v.update(src=g('src') or s.get('source_name', '') or ('Рынок' if L == 'ru' else 'Bozor' if L == 'uz' else 'Markets'), head=g('head'), date=g('date')); d['icon'] = ic(s.get('icon') or sym)
     elif ty == 'notify':
         icons = s.get('icons') or []
         v['items'] = [{'icon': ic(icons[i] if i < len(icons) else 'news'), 'title': it.get('title', ''), 'text': it.get('text', '')} for i, it in enumerate(t.get('items') or [])][:3]
@@ -1121,7 +1152,7 @@ def scene_data3(s, L, script, work, logos):
                 except Exception: pass
             lo, hi = min(b[3] for b in bars), max(b[2] for b in bars)
             if isinstance(s.get('level'), (int, float)) and lo - (hi - lo) * 0.3 <= s['level'] <= hi + (hi - lo) * 0.3: v['level'] = s['level']
-        elif s.get('value') is not None: d['type'] = 'stat'; v.update(value=s['value'], decimals=s.get('decimals') or 0, label=g('label'), prefix=g('prefix'), suffix=g('suffix'))
+        elif s.get('value') is not None: d['type'] = 'stat'; v.update(value=s['value'], decimals=s.get('decimals') or (0 if float(s['value']).is_integer() else 1), label=g('label') or g('mark_label'), prefix=g('prefix'), suffix=g('suffix'), tone=s.get('tone') or 'none')
         else: d['type'] = 'news'; v.update(src=g('label') or sym, head=g('mark_label') or script.get('topic', ''), date=''); d['icon'] = ic(sym)
     elif ty == 'list':
         rows, names = [], t.get('names') or []
@@ -1146,6 +1177,7 @@ def scene_data3(s, L, script, work, logos):
     elif ty == 'cta':
         k, c = CTA_TXT[L]; v.update(word=re.sub(r'[^A-Z0-9]', '', str(s.get('word') or g('label') or script.get('asset') or 'TRAI').upper())[:8] or 'TRAI', note=c)
     # пустая вещь — не показываем пустой экран
+    if d['type'] == 'quote' and not v.get('text'): d['type'] = 'news'; v.update(src=v.get('who') or g('src'), head=t.get('say', ''), date='')
     if (d['type'] in ('notify', 'chain') and not v.get('items')) or (d['type'] in ('list', 'bars') and not v.get('rows')) or (d['type'] == 'news' and not v.get('head')):
         d['type'] = 'stat' if s.get('value') is not None else 'news'
         if d['type'] == 'stat': v.update(value=s['value'], decimals=s.get('decimals') or 0, label=g('label'), prefix=g('prefix'), suffix=g('suffix'))
@@ -1324,6 +1356,8 @@ def make_video(script, L, idx, stamp, mock=False):
         try:
             p = os.path.join(work, 'vo_all.wav'); tts_gemini_whole(says, L, p); a, off = trim(read_wav(p))
             wr = lambda path, arr: (lambda w: (w.setnchannels(1), w.setsampwidth(2), w.setframerate(SR), w.writeframes((np.clip(arr, -1, 1) * 32767).astype('<i2').tobytes()), w.close()))(wave.open(path, 'wb'))
+            if script.get('v') == 3:  # без затяжных пауз на запятых и чуть бодрее (VOICE_TEMPO, по умолчанию ×1,1)
+                a = tighten(a, float(os.environ.get('VOICE_GAP') or 0.16), float(os.environ.get('VOICE_TEMPO') or 1.1), work)
             wr(p, a)
             toks = [(w, i) for i, sy in enumerate(says) for w in words_of(sy)]
             heard = whisper_words(p, L); tm = align_text([w for w, _ in toks], heard, len(a) / SR)
@@ -1372,6 +1406,7 @@ def make_video(script, L, idx, stamp, mock=False):
         d = scene_data3(s, L, script, work, logos) if v3 else scene_data2(s, L, script) if v2 else scene_data(s, L, work); st = ws[0][1] if ws else (scenes[-1]['start'] + 2.5 if scenes else 0.3)
         d['start'] = 0.0 if i == 0 else round(max(st - (0.18 if v2 else 0.12), scenes[-1]['start'] + 0.8), 3)
         if v2: d['beats'] = beat_times(ws, (s.get(L) or {}).get('beats') or [])
+        if v3 and d.get('beats') and d['type'] not in ('stat', 'scale'): d['beats'][0] = min(d['beats'][0], d['start'] + 0.3)  # карточка — сразу с фразой, без пустого экрана
         scenes.append(d)
         if v3:  # фраза сверху целиком, главное слово — цветом
             keyset = {norm(k) for k in (s[L].get('keys') or []) for k in k.split()}
