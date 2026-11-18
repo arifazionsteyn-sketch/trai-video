@@ -64,8 +64,10 @@ function plane(cx, cy, r) {
 function header(t) {
   if (t > OUT) return;
   const al = eo(seg(t, 0, 0.4)); x.save(); x.globalAlpha = al;
+  const SC = J.scenes;
+  if (!J.clean) {  // ник и полоска прогресса — только в старых роликах (без них ролик лучше попадает в рекомендации)
   plane(92, 132, 20); x.font = '600 28px IN'; x.fillStyle = 'rgba(242,243,245,0.7)'; x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillText(J.handle || '@trai_agent_bot', 124, 133);
-  const SC = J.scenes, n = SC.length, cur = Math.max(0, SC.findIndex(s => t >= s.start && t < s.end));
+  const n = SC.length, cur = Math.max(0, SC.findIndex(s => t >= s.start && t < s.end));
   x.textAlign = 'right'; x.font = '600 26px IN'; x.fillStyle = 'rgba(242,243,245,0.5)';
   const lab = String(cur + 1).padStart(2, '0') + ' / ' + String(n).padStart(2, '0'); x.fillText(lab, W - 70, 133);
   // сегменты
@@ -75,9 +77,10 @@ function header(t) {
     x.fillStyle = 'rgba(255,255,255,0.09)'; rr(px, 176, w0, 4, 2); x.fill();
     if (p > 0) { x.fillStyle = i === cur ? GOLD : 'rgba(217,180,106,0.55)'; rr(px, 176, Math.max(4, w0 * p), 4, 2); x.fill(); }
   });
+  }
   x.restore(); x.textBaseline = 'alphabetic';
   // предупреждение — мелко в первые секунды
-  if (J.disclaimer && t < (SC[0]?.end || 3)) { const d = eo(seg(t, 0.3, 0.4)) * (1 - seg(t, (SC[0]?.end || 3) - 0.3, 0.3)); x.save(); x.globalAlpha = d * 0.7; x.font = '500 22px IN'; x.fillStyle = FAINT; x.textAlign = 'left'; x.fillText(J.disclaimer, 70, 222); x.restore(); }
+  if (J.disclaimer && t < (SC[0]?.end || 3)) { const d = eo(seg(t, 0.3, 0.4)) * (1 - seg(t, (SC[0]?.end || 3) - 0.3, 0.3)); x.save(); x.globalAlpha = d * 0.7; x.font = '500 22px IN'; x.fillStyle = FAINT; x.textAlign = 'left'; x.fillText(J.disclaimer, 70, J.clean ? 140 : 222); x.restore(); }
 }
 
 // ---------- Вход и выход сцены: подъём снизу с проявлением, уход вверх ----------

@@ -1,4 +1,4 @@
-# TRAI — ролики «истории рынка»: история недели (Finnhub, Marketaux + поиск Google) → сценарий (писатель + редактор) RU/EN/UZ → голос Gemini → кадры scene3.html → эффекты → Telegram.
+# TRAI — ролики «истории рынка»: история недели (Finnhub, Marketaux + поиск Google) → сценарий (писатель + редактор) RU/EN/UZ → голос Gemini → кадры scene2.html (фирменный вид, без ника и полоски) → эффекты → Telegram.
 # Расписание: каждый день 2 истории × 3 языка. Разовый запуск: изменить video/run.json (count, langs, mode: story | gold) и сохранить (commit),
 # или кнопка «Run workflow».
 name: video

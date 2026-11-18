@@ -801,14 +801,21 @@ SCHEMA2 = {'type': 'OBJECT', 'required': ['topic', 'category', 'asset', 'scenes'
 RULES2 = '''Ты сценарист и режиссёр коротких вертикальных роликов (Shorts, Reels, TikTok) аккаунта TRAI о рынках.
 Стиль — строгий, «данные на экране»: тёмный фон, настоящие графики, крупные числа, без персонажей. Каждый ролик — законченная ИСТОРИЯ с началом и концом.
 
-СТРУКТУРА (7–9 сцен, 40–50 секунд):
+СТРУКТУРА (8–10 сцен, 40–50 секунд — диктор читает бодро):
 1. hook — крючок за 2–3 секунды: самое сильное число или факт. Утверждение, от которого хочется досмотреть (не «знаете ли вы»).
 2. Что случилось — candles (настоящий график актива с отметкой события) и/или headline (новость: издание, дата, суть своими словами).
 3–5. Почему — chain (2–4 звена «причина → следствие»), counter / versus / bars / grid / ring / timeline с ключевыми цифрами.
 6. Поворот — то, что большинство упускает (неочевидная деталь, уровень, сравнение с прошлым), начинай с «Но…» / «А вот…».
+6б. Что это значит для обычного человека — counter, versus, bars или chain с простыми последствиями.
 7. Что дальше — checklist (2–3 конкретных сигнала: даты, уровни, события) или timeline.
 8. cta — призыв написать кодовое слово в комментариях.
-Каждая сцена отвечает на вопрос, который оставила предыдущая: «что → почему → но → что дальше». Без повторов одной мысли.
+Каждая сцена отвечает на вопрос, который оставила предыдущая: «что → почему → и тогда → но → что это значит → что дальше». Без повторов одной мысли.
+ЗРИТЕЛЬ — обычный человек, не трейдер. Ролик должен понять школьник и его родители:
+- каждый термин объясни на лету тремя-пятью словами («Brent — главный сорт нефти в мире», «ФРС — центробанк США», «ставка — цена денег в долг»);
+- каждую причину объясни через простую механику («нефти добывают больше, чем покупают, — и она дешевеет»);
+- обязательно одна сцена «что это значит для обычного человека»: бензин, цены в магазинах, доллар, сбережения, ипотека — только то, что прямо следует из фактов;
+- без воды: каждая фраза либо новый факт, либо объяснение. Никаких «интересно, что», «стоит отметить», «на этом фоне», «ситуация остаётся напряжённой».
+- сцены разные по картинке: не больше двух headline, минимум 5 разных типов сцен.
 Подряд не ставь два одинаковых типа сцен. candles — 1–2 раза, chain — 1 раз.
 
 СЦЕНЫ И ИХ ДАННЫЕ (поля сцены — общие для всех языков, тексты — в ru/en/uz):
@@ -832,8 +839,10 @@ RULES2 = '''Ты сценарист и режиссёр коротких вер�
   kicker «Напиши в комментариях»; cta «пришлю разбор и уровни»; say «Напиши в комментариях NVDA — пришлю разбор.» (на нужном языке).
 
 ТЕКСТЫ (ru, en, uz — узбекский латиницей, современный):
-- say — что говорит диктор: 1–2 коротких предложения, 8–20 слов. Весь текст: русский 85–110 слов, английский 80–105, узбекский 70–90.
-  Живо, разговорно, как рассказчик популярного канала о рынках: интрига в начале, перед главной цифрой и поворотом — тире «—» (пауза).
+- say — что говорит диктор: 1–2 коротких предложения, 8–20 слов. Весь текст: русский 95–120 слов, английский 90–115, узбекский 80–100.
+  Живо, разговорно, как рассказчик популярного канала о рынках: интрига в начале, фразы короткие, без длинных перечислений через запятые.
+  ЧИСЛА В РЕЧИ — КРУГЛЫЕ И ПРОСТЫЕ: «почти 104 пункта», «около 3900 долларов», «на 19%». Дробей вроде «103,69» в речи нет — точное число покажи на экране.
+  Названия бирж и сайтов в речи не произноси (издание — только «по данным Reuters», если это важно).
   Числа цифрами, проценты можно «12%». НЕ используй значок $ и сокращения (млн, млрд, тыс.) — пиши «75 тысяч долларов», «1,3 миллиарда долларов».
 - beats — 1–3 слова ИЗ say этой сцены (точно как в тексте, по одному слову), на которых меняется картинка: chain — по слову на каждое звено,
   checklist и timeline — на каждый пункт, candles — 2 (событие, уровни), counter/versus/grid/ring — 1–2 (на главной цифре).
@@ -849,7 +858,8 @@ RULES2 = '''Ты сценарист и режиссёр коротких вер�
 - Не финансовый совет: без «покупайте/продавайте», говори «сценарий», «уровень», «за чем следить».
 - Без поучений и шаблонов: никаких «друзья», «давайте разберём», «важно понимать», «запомните», «подписывайтесь».
 topic — заголовок ролика по-русски; category и asset (главный тикер) — из исследования.
-post — подпись для соцсетей на каждом языке (2–3 предложения + призыв зайти в бота @trai_agent_bot, без хэштегов) и hashtags (5–8 штук).'''
+post — подпись для соцсетей на каждом языке (2–3 предложения, без хэштегов, без ссылок и упоминания бота) и hashtags (5–8 штук).'''
+
 
 
 STOP_WORDS = ['шпион', 'любовн', 'интим', 'арестова', 'обвиня', 'обвинен', 'подозрева', 'мошенни', 'взятк', 'коррупц', 'преступ', 'насили', 'наркот',
@@ -886,9 +896,9 @@ def make_script_story(facts):
     if not sc: raise RuntimeError('слишком короткий сценарий')
     for _ in range(2):  # длина: 40–50 секунд речи
         wl = [len((x.get('ru') or {}).get('say', '').split()) for x in sc['scenes']]
-        if sum(wl) <= 118 and max(wl) <= 24: break
+        if sum(wl) <= 128 and max(wl) <= 24: break
         log(f'сценарий длинный ({sum(wl)} слов, самая длинная фраза {max(wl)}) — сокращаю')
-        msg2 = ('Сократи этот сценарий: каждая фраза say — 8–20 слов, весь русский текст 85–110 слов (английский и узбекский — так же коротко). '
+        msg2 = ('Сократи этот сценарий: каждая фраза say — 8–20 слов, весь русский текст 95–120 слов (английский и узбекский — так же коротко). '
                 'Сохрани историю, цифры, интригу, типы сцен и все остальные поля; beats и keys должны остаться словами из нового say. Верни тот же JSON.\n\n' + json.dumps(sc, ensure_ascii=False))
         try:
             t2, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg2}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
@@ -897,6 +907,13 @@ def make_script_story(facts):
         except Exception as e: log('сократить не вышло:', e); break
     # Стоп-слова: обвинения, слухи и личная жизнь людей (шпионаж, связи, аресты) — даже «предполагаемые». Такие сцены переписываем,
     # а если не вышло — тему бросаем (запасная тема возьмёт другую): аккаунту не нужны претензии за клевету.
+    # редактор: сверяет факты с исследованием, убирает воду и слухи, проверяет цепочку, понятность и разнообразие сцен
+    try:
+        t2, _, m2 = gemini({'contents': [{'role': 'user', 'parts': [{'text': EDITOR2 + '\n\nСЦЕНАРИЙ:\n' + json.dumps(sc, ensure_ascii=False) + '\n\nИССЛЕДОВАНИЕ:\n' + facts}]}],
+                            'generationConfig': {**gc, 'temperature': 0.3, 'responseSchema': SCHEMA2}}, timeout=240)
+        ed = parse(t2)
+        if len(ed.get('scenes') or []) >= 5: sc = ed; model += f' → редактор {m2}'
+    except Exception as e: log('редактор:', e)
     bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
     for _ in range(2):
         hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
@@ -1067,6 +1084,14 @@ EDITOR3 = '''Ты строгий главный редактор финансо�
 9. РЕЧЬ: числа в say круглые и простые («почти 104 пункта», «около 3900 долларов»); дробей вроде «103,69» в речи нет — точное число остаётся на карточке. Названий бирж, сайтов и изданий в say нет.
 10. РАЗНООБРАЗИЕ: stat и chart — каждый не больше двух раз, минимум 5 разных типов сцен.
 8. Узбекский — латиницей, современный и естественный; английский — естественный.'''
+
+EDITOR2 = (EDITOR3.split('6. ДАННЫЕ СЦЕН')[0] + '''6. ДАННЫЕ СЦЕН: у каждой сцены заполнены поля для её типа (candles — symbol, range, interval; counter — value; versus — a_value и b_value; grid — total и count; ring — pct;
+bars — values и items; chain, timeline — items; checklist — list; headline — source_name и text; cta — title). Если данных нет в фактах — смени тип сцены.
+7. beats и keys — слова, которые точно есть в say этой сцены.
+8. Узбекский — латиницей, современный и естественный; английский — естественный.
+9. РЕЧЬ: числа в say круглые и простые; дробей вроде «103,69» в речи нет — точное число остаётся на экране. Длинных перечислений через запятые нет.
+10. РАЗНООБРАЗИЕ: не больше двух headline, минимум 5 разных типов сцен, подряд нет двух одинаковых типов.
+11. ПОНЯТНОСТЬ: каждый термин объяснён простыми словами, есть сцена «что это значит для обычного человека». Весь русский текст 95–120 слов.''')
 
 
 def make_script3(facts):
@@ -1356,7 +1381,7 @@ def make_video(script, L, idx, stamp, mock=False):
         try:
             p = os.path.join(work, 'vo_all.wav'); tts_gemini_whole(says, L, p); a, off = trim(read_wav(p))
             wr = lambda path, arr: (lambda w: (w.setnchannels(1), w.setsampwidth(2), w.setframerate(SR), w.writeframes((np.clip(arr, -1, 1) * 32767).astype('<i2').tobytes()), w.close()))(wave.open(path, 'wb'))
-            if script.get('v') == 3:  # без затяжных пауз на запятых и чуть бодрее (VOICE_TEMPO, по умолчанию ×1,1)
+            if script.get('v') in (2, 3):  # без затяжных пауз на запятых и чуть бодрее (VOICE_TEMPO, по умолчанию ×1,1)
                 a = tighten(a, float(os.environ.get('VOICE_GAP') or 0.16), float(os.environ.get('VOICE_TEMPO') or 1.1), work)
             wr(p, a)
             toks = [(w, i) for i, sy in enumerate(says) for w in words_of(sy)]
@@ -1418,7 +1443,7 @@ def make_video(script, L, idx, stamp, mock=False):
     beats = [] if v2 else [c['w'][c['key']][1] for c in subs if c.get('key', -1) >= 0]
     if v3:  # без ника и полоски прогресса — так ролик лучше попадает в рекомендации
         job = {'template': 'scene3.html', 'lang': L, 'tagline': TAGLINE[L], 'disclaimer': DISCLAIMER_SHORT[L], 'logos': logos, 'scenes': scenes, 'subs': subs, 'outro': outro, 'total': total}
-    else: job = {'template': 'scene2.html' if v2 else 'scene.html', 'lang': L, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': (DISCLAIMER_SHORT if v2 else DISCLAIMER)[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
+    else: job = {'template': 'scene2.html' if v2 else 'scene.html', 'lang': L, 'clean': v2, 'handle': '@trai_agent_bot', 'tagline': TAGLINE[L], 'disclaimer': (DISCLAIMER_SHORT if v2 else DISCLAIMER)[L], 'scenes': scenes, 'subs': subs, 'beats': beats, 'outro': outro, 'total': total}
     jp = os.path.join(work, 'job.json'); json.dump(job, open(jp, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     v = np.concatenate([voice, np.zeros(max(0, int(total * SR) - len(voice)))])[:int(total * SR)]
     with wave.open(os.path.join(work, 'voice.wav'), 'wb') as w:
@@ -1489,7 +1514,7 @@ def main():
     ap.add_argument('--count', type=int, default=1); ap.add_argument('--langs', default='ru,en,uz'); ap.add_argument('--formats', default='')
     ap.add_argument('--mode', default='story', choices=['story', 'gold'])  # story — истории любого рынка за неделю; gold — старые темы про золото
     ap.add_argument('--mock', action='store_true')
-    ap.add_argument('--style', default=os.environ.get('VIDEO_STYLE') or 'v3', choices=['v2', 'v3'])  # v3 — «логическая цепочка» (scene3.html)
+    ap.add_argument('--style', default=os.environ.get('VIDEO_STYLE') or 'v2', choices=['v2', 'v3'])  # v2 — фирменный вид (scene2.html) с новым сценарием; v3 — карточки (scene3.html)
     a = ap.parse_args(); langs = [l for l in a.langs.split(',') if l in LANGS_ALL]
     os.makedirs(OUTDIR, exist_ok=True)
     hist = json.load(open(HIST, encoding='utf-8')) if os.path.exists(HIST) else []
@@ -1513,11 +1538,10 @@ def main():
                     avoid = set(cats_run) | {h.get('category') for h in hist[-2:] if h.get('category')}
                     facts, src, m1, cat = research_story(hist, avoid); log('история/факты:', m1, facts[:500].replace('\n', ' '))
                     cats_run.append(cat)  # даже если сценарий не выйдет, запасная тема возьмёт другую категорию
-                    if a.style == 'v3':
+                    if True:
                         am = re.search(r'АКТИВ[^\n]*?\(([A-Z^][A-Z0-9.=^-]{0,9})\)', facts) or re.search(r'АКТИВ[^\n]*?\b([A-Z]{2,5}(?:-USD|=[FX])?)\b', facts); an = asset_notes(am.group(1)) if am else []
                         if an: facts += '\n\nЗАМЕТКИ ПО АКТИВУ (Finnhub, Marketaux):\n' + fmt_items(an); src = list(dict.fromkeys(src + [x['src'] for x in an if x['src']]))[:10]
-                        script, m2 = make_script3(facts)
-                    else: script, m2 = make_script_story(facts)
+                    script, m2 = make_script3(facts) if a.style == 'v3' else make_script_story(facts)
                     models = f'{m1}, {m2}'
                     script['category'] = script.get('category') or cat
                     json.dump({'facts': facts, 'sources': src, 'script': script}, open(os.path.join(OUTDIR, f'script_{stamp}_{n}.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
