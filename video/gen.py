@@ -993,7 +993,7 @@ RULES3 = '''Ты сценарист коротких вертикальных р
 7. Поворот: «Но…» — неочевидная деталь из фактов.
 8. Что дальше: calendar (ближайшая дата события) или scale.
 9. cta — кодовое слово в комментариях.
-Подряд не ставь два одинаковых типа. chart — не больше двух раз.
+Подряд не ставь два одинаковых типа. chart и stat — каждый не больше двух раз; минимум 5 разных типов в ролике. Если есть тикер с историей цен — хотя бы один chart или list.
 
 ВЕЩИ НА ЭКРАНЕ (поля сцены общие для всех языков; тексты — в ru/en/uz):
 - news: тексты src (издание), date («17 ноя»), head (суть новости своими словами, до 12 слов). icon — тикер компании (NVDA) или gold/usd/fed/btc/oil/eur/cny/news.
@@ -1010,7 +1010,8 @@ RULES3 = '''Ты сценарист коротких вертикальных р
 tint — цвет света сцены по смыслу: red — падение, green — рост, blue — макро и ставки, violet — технологии и компании, gold — золото и сырьё, teal — крипта.
 
 ТЕКСТЫ (ru, en, uz — узбекский латиницей, современный):
-- say — что говорит диктор: одно предложение, 6–16 слов. Весь русский текст 75–100 слов, английский 70–95, узбекский 60–85.
+- say — что говорит диктор: одно предложение, 6–16 слов. ЧИСЛА В РЕЧИ — КРУГЛЫЕ И ПРОСТЫЕ: «почти 104 пункта», «около 3900 долларов», «на 19%», «92 процента».
+  Никогда не произноси дроби вроде «103,69» или «0,4 процента» — точное число покажи на карточке (stat, chart). Названия бирж, сайтов и изданий в say не произноси — издание пиши на карточке news. Весь русский текст 75–100 слов, английский 70–95, узбекский 60–85.
   Разговорно и живо. Каждая фраза связана с предыдущей словами-связками («из-за этого», «и тогда», «но», «а значит»). Ни одной лишней детали: если факт не двигает историю — выкинь.
   Числа цифрами, проценты «12%». Не пиши значок $ и сокращения (млн, млрд) в say — «75 тысяч долларов», «1,3 миллиарда долларов».
 - beats — 1–3 слова ИЗ say этой сцены (точно как в тексте), на которых появляется следующий элемент (уведомление, звено, бейдж). Для одиночной вещи — 1–2 слова.
@@ -1034,6 +1035,8 @@ EDITOR3 = '''Ты строгий главный редактор финансо�
 5. ЛИШНЕЕ: выкинь детали, которые не двигают историю. Каждая фраза say — 6–16 слов; весь русский текст 75–100 слов.
 6. ДАННЫЕ СЦЕН: у каждой сцены заполнены поля для её типа (у chart — symbol, у stat — value, у chain — items, у calendar — event_date и т.д.). Если данных нет в фактах — смени тип сцены.
 7. beats и keys — слова, которые точно есть в say этой сцены.
+9. РЕЧЬ: числа в say круглые и простые («почти 104 пункта», «около 3900 долларов»); дробей вроде «103,69» в речи нет — точное число остаётся на карточке. Названий бирж, сайтов и изданий в say нет.
+10. РАЗНООБРАЗИЕ: stat и chart — каждый не больше двух раз, минимум 5 разных типов сцен.
 8. Узбекский — латиницей, современный и естественный; английский — естественный.'''
 
 
@@ -1173,14 +1176,15 @@ def quotes(sym, rng='1mo', interval='1d'):
     k = (sym, rng, interval)
     if k in QUOTES: return QUOTES[k]
     out = None
-    for host in ('query1', 'query2'):
+    for host in ('query1', 'query2', 'query1'):  # на 429 — пауза и ещё попытка
+        if host == 'query1' and out is None and QUOTES.get(('_429', sym)): time.sleep(7)
         try:
             u = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}?range={rng}&interval={interval}&includePrePost=false'
             with urllib.request.urlopen(urllib.request.Request(u, headers=UA), timeout=20) as r: res = json.load(r)['chart']['result'][0]
             q = res['indicators']['quote'][0]
             bars = [[t, o, h, l, c] for t, o, h, l, c in zip(res['timestamp'], q['open'], q['high'], q['low'], q['close']) if None not in (o, h, l, c)]
             if len(bars) >= 3: out = {'bars': bars, 'currency': (res.get('meta') or {}).get('currency') or 'USD', 'src': 'Yahoo Finance'}; break
-        except Exception as e: log('Yahoo', sym, host, e)
+        except Exception as e: log('Yahoo', sym, host, e); QUOTES[('_429', sym)] = '429' in str(e)
     if not out and re.fullmatch(r'[A-Z0-9]+-USD', sym):  # крипта — Gate
         try:
             gi = {'1h': '1h', '1d': '1d', '1wk': '7d'}[interval]; lim = min(900, RANGE_DAYS[rng] * (24 if gi == '1h' else 1) // (7 if gi == '7d' else 1) + 1)
@@ -1475,7 +1479,7 @@ def main():
                     facts, src, m1, cat = research_story(hist, avoid); log('история/факты:', m1, facts[:500].replace('\n', ' '))
                     cats_run.append(cat)  # даже если сценарий не выйдет, запасная тема возьмёт другую категорию
                     if a.style == 'v3':
-                        am = re.search(r'АКТИВ[^\n]*?\(?\b([A-Z]{1,5}(?:-USD|=[FX])?|\^[A-Z]+)\b', facts); an = asset_notes(am.group(1)) if am else []
+                        am = re.search(r'АКТИВ[^\n]*?\(([A-Z^][A-Z0-9.=^-]{0,9})\)', facts) or re.search(r'АКТИВ[^\n]*?\b([A-Z]{2,5}(?:-USD|=[FX])?)\b', facts); an = asset_notes(am.group(1)) if am else []
                         if an: facts += '\n\nЗАМЕТКИ ПО АКТИВУ (Finnhub, Marketaux):\n' + fmt_items(an); src = list(dict.fromkeys(src + [x['src'] for x in an if x['src']]))[:10]
                         script, m2 = make_script3(facts)
                     else: script, m2 = make_script_story(facts)
