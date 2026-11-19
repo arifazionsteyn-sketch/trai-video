@@ -241,7 +241,8 @@ SC.hook = (t, s) => {
   kicker(s.kicker, 330);
   title(s.title, 470, 112, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
   // иллюстрация под тему ролика (слитки, монета, бочка, доллары, банк, чип, свечи)
-  ART[s.art] ? ART[s.art](t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1) : ART.candles(t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1);
+  { const fy = Math.sin((t - s.start) * 1.7) * 9, br = 1 + Math.sin((t - s.start) * 1.1) * 0.012; x.save(); x.translate(W / 2, 1150 + fy); x.scale(br, br); x.translate(-W / 2, -1150); // картинка «дышит» — кадр не замирает
+  ART[s.art] ? ART[s.art](t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1) : ART.candles(t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1); x.restore(); }
   if (s.value != null) {
     const b1 = beatT(s, 0, 0.35), p = eo(seg(t, b1 - 0.15, 0.9)), pop = eb(seg(t, b1 - 0.15, 0.35));
     if (pop > 0) {

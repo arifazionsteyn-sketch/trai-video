@@ -357,8 +357,8 @@ VOICE_DEFAULT = {'ru': 'Fenrir', 'en': 'Algenib', 'uz': 'Fenrir'}
 MODEL_DEFAULT = {'ru': 'gemini-3.8-flash-lite-tts', 'en': 'gemini-3.1-flash-tts-preview', 'uz': 'gemini-3.8-flash-lite-tts'}
 
 
-def tighten(a, max_gap=0.16, tempo=1.0, work=None):
-    # паузы длиннее max_gap (запятые, переходы между строками) укорачиваем до max_gap; затем — ускорение без изменения высоты голоса
+def tighten(a, max_gap=0.16, tempo=1.0, work=None, line_gap=0.34):
+    # паузы на запятых (до 0,45 с) укорачиваем до max_gap, паузы между строками (слайдами) — до line_gap: мини-пауза между слайдами остаётся
     win = int(0.01 * SR); n = len(a) // win
     if n < 10: return a
     rms = np.sqrt(np.mean(a[:n * win].reshape(n, win) ** 2, axis=1)); thr = max(np.percentile(rms, 95) * 0.06, 0.003)
@@ -367,8 +367,9 @@ def tighten(a, max_gap=0.16, tempo=1.0, work=None):
         j = i
         while j < n and sil[j] == sil[i]: j += 1
         seg = a[i * win:j * win]
-        if sil[i] and j - i > keep and 0 < i and j < n:
-            h = keep * win // 2; seg = np.concatenate([seg[:h], seg[-h:]]); cut += (j - i - keep) * 0.01
+        kk = int(line_gap / 0.01) if j - i > 45 else keep
+        if sil[i] and j - i > kk and 0 < i and j < n:
+            h = kk * win // 2; seg = np.concatenate([seg[:h], seg[-h:]]); cut += (j - i - kk) * 0.01
         out.append(seg); i = j
     b = np.concatenate(out + [a[n * win:]])
     if tempo > 1.001 and work:
@@ -379,16 +380,29 @@ def tighten(a, max_gap=0.16, tempo=1.0, work=None):
     return b
 
 
+def tail_cut(a, le):
+    # после последнего слова у Gemini бывает короткий резкий шум на всех частотах. Ищем первый «шумовой» кадр (ровный спектр, громко)
+    # после конца последнего слова и режем перед ним; если шума нет — через 0,22 с после слова
+    win = int(0.02 * SR); i0 = max(0, int((le - 0.06) * SR)); i1 = min(len(a), int((le + 0.6) * SR)); peak = np.abs(a).max() or 1
+    for i in range(i0, i1 - win, win // 2):
+        f = a[i:i + win]; e = np.sqrt(np.mean(f ** 2))
+        if e < peak * 0.03: continue
+        sp = np.abs(np.fft.rfft(f * np.hanning(win))) + 1e-9; flat = np.exp(np.mean(np.log(sp))) / np.mean(sp)
+        if flat > 0.35 and i / SR > le - 0.02: return max(le + 0.02, i / SR - 0.01)
+    return min(len(a) / SR, le + 0.22)
+
+
 def tts_gemini_whole(lines, lang, path, avoid=()):
     import base64
     key = os.environ['GEMINI_SCRIPT_KEY']; voice = os.environ.get('GEMINI_VOICE_' + lang.upper()) or os.environ.get('GEMINI_VOICE') or VOICE_DEFAULT[lang]; errs = []
     text = '\n'.join(lines)
-    first = MODEL_DEFAULT.get(lang); models = ([first] if first else []) + [x for x in TTS_MODELS if x != first]
-    models = [m for m in models if m not in avoid] or models
+    first = os.environ.get('GEMINI_TTS_MODEL_' + lang.upper()) or MODEL_DEFAULT.get(lang)
+    # один и тот же голос во всех роликах: другие модели звучат иначе, поэтому запасные — только если закреплённой модели нет
+    models = [first] if first else TTS_MODELS[:1]
     for m in models:
         noinst = False
         # основную модель пробуем дольше (у запасных другой тембр — голос не должен «гулять» от ролика к ролику)
-        for attempt in range(5 if m == models[0] else 2):
+        for attempt in range(6):
             try:
                 body = {'contents': [{'role': 'user', 'parts': [{'text': text}]}],
                         'generationConfig': {'responseModalities': ['AUDIO'], 'speechConfig': {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': voice}}}}}
@@ -873,7 +887,9 @@ post — подпись для соцсетей на каждом языке (2�
 
 
 
-CTA_SAY = {'ru': 'Напиши {w} в комментариях — пришлю разбор.', 'en': 'Comment {w} and I will send you the breakdown.', 'uz': 'Izohga {w} deb yozing — tahlilni yuboraman.'}
+CTA_SAY = {'ru': 'Напиши «{w}» в комментариях — пришлю разбор.', 'en': 'Comment “{w}” and I will send you the breakdown.', 'uz': 'Izohga «{w}» deb yozing — tahlilni yuboraman.'}
+# одно кодовое слово во всех роликах — без путаницы (на экране то же слово, что говорит диктор)
+CTA_WORD = {'ru': 'агент', 'en': 'agent', 'uz': 'agent'}
 WORD_OF = {'GC=F': 'GOLD', 'XAUUSD=X': 'GOLD', 'SI=F': 'SILVER', 'CL=F': 'OIL', 'BZ=F': 'OIL', 'DX-Y.NYB': 'USD', '^GSPC': 'SPX', '^IXIC': 'NASDAQ', '^DJI': 'DOW'}
 
 
@@ -889,10 +905,9 @@ def fix_cta(sc):
     ctas = [x for x in sc.get('scenes') or [] if x.get('type') == 'cta']
     if not ctas: sc.setdefault('scenes', []).append({'type': 'cta'}); ctas = sc['scenes'][-1:]
     for x in ctas[:-1]: sc['scenes'].remove(x)
-    c = ctas[-1]; w = cta_word(sc, c.get('word') or (c.get('ru') or {}).get('title') or (c.get('en') or {}).get('title'))
-    c['word'] = w
+    c = ctas[-1]
     for L in LANGS_ALL:
-        t = c.setdefault(L, {}); t.update(title=w, say=CTA_SAY[L].format(w=w), beats=[w], keys=[w])
+        w = CTA_WORD[L]; t = c.setdefault(L, {}); t.update(title=w.upper(), say=CTA_SAY[L].format(w=w), beats=[w], keys=[w])
     if sc['scenes'][-1] is not c: sc['scenes'].remove(c); sc['scenes'].append(c)
     return sc
 
@@ -1477,7 +1492,7 @@ def scene_data2(s, L, script):
         d['items'] = its
         if not its: d.update(type='hook')
     elif ty == 'cta':
-        k, c = CTA_TXT[L]; d.update(title=cta_word(script, s.get('word') or g('title')), kicker=k, cta=c)
+        k, c = CTA_TXT[L]; d.update(title=CTA_WORD[L].upper(), kicker=k, cta=c)
     # пустые сцены не показываем пустыми
     if d['type'] in ('chain', 'timeline', 'checklist', 'bars', 'ticker') and not d.get('items'): d['type'] = 'hook'
     if d['type'] == 'ring' and not d.get('pct'): d['type'] = 'hook'
@@ -1496,15 +1511,15 @@ def make_video(script, L, idx, stamp, mock=False):
         try:
             p = os.path.join(work, 'vo_all.wav'); wr = lambda path, arr: (lambda w: (w.setnchannels(1), w.setsampwidth(2), w.setframerate(SR), w.writeframes((np.clip(arr, -1, 1) * 32767).astype('<i2').tobytes()), w.close()))(wave.open(path, 'wb'))
             # голос иногда обрывается на середине текста (модель прочитала половину) — сверяем число услышанных слов и переозвучиваем
-            nw, avoid = len([w for sy in says for w in words_of(sy)]), []
+            nw = len([w for sy in says for w in words_of(sy)])
             for att in range(3):
-                tts_gemini_whole(says, L, p, avoid); hw = len(whisper_words(p, L))
+                tts_gemini_whole(says, L, p); hw = len(whisper_words(p, L))
                 if hw >= nw * 0.82: break
-                log(f'озвучка неполная: услышано {hw} слов из {nw} — переозвучиваю'); avoid.append(getattr(tts_gemini_whole, 'last_model', ''))
+                log(f'озвучка неполная: услышано {hw} слов из {nw} — переозвучиваю тем же голосом'); time.sleep(5)
             else: raise RuntimeError(f'озвучка неполная: {hw} слов из {nw}')
             a, off = trim(read_wav(p))
             if script.get('v') in (2, 3):  # без затяжных пауз на запятых и чуть бодрее (VOICE_TEMPO, по умолчанию ×1,1)
-                a = tighten(a, float(os.environ.get('VOICE_GAP') or 0.16), float(os.environ.get('VOICE_TEMPO') or 1.1), work)
+                a = tighten(a, float(os.environ.get('VOICE_GAP') or 0.16), float(os.environ.get('VOICE_TEMPO') or 1.04), work, float(os.environ.get('VOICE_LINE_GAP') or 0.34))
             wr(p, a)
             toks = [(w, i) for i, sy in enumerate(says) for w in words_of(sy)]
             heard = whisper_words(p, L); tm = align_text([w for w, _ in toks], heard, len(a) / SR)
@@ -1514,8 +1529,10 @@ def make_video(script, L, idx, stamp, mock=False):
                 log(f'вырезаю {cut:.2f} с лишней речи в начале'); a = a[int(cut * SR):].copy(); n_ = int(0.01 * SR); a[:n_] *= np.linspace(0, 1, n_); tm = [max(0.0, x_ - cut) for x_ in tm]
             # после последнего слова у Gemini бывает шум/«жужжание» — обрезаем через 0,3 с после конца речи и плавно гасим
             le = getattr(whisper_words, 'last_end', None)
-            if le and le - cut + 0.3 < len(a) / SR:
-                a = a[:int((le - cut + 0.3) * SR)].copy(); n = int(0.08 * SR); a[-n:] *= np.linspace(1, 0, n); log(f'хвост после речи обрезан на {le - cut + 0.3:.1f} с')
+            if le:
+                end = tail_cut(a, le - cut)
+                if end < len(a) / SR: a = a[:int(end * SR)].copy(); log(f'хвост после речи обрезан на {end:.2f} с')
+                n = int(0.06 * SR); a[-n:] *= np.linspace(1, 0, n)
             if len(a) / SR > 52:  # только если совсем длинно (> 52 с) — чуть ускоряем без изменения высоты голоса (не больше чем на 18%), время слов — так же
                 k = min(1.12, len(a) / SR / 48); tmp = os.path.join(work, 'vo_raw.wav'); wr(tmp, a)
                 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', tmp, '-filter:a', f'atempo={k:.3f}', '-ar', str(SR), '-ac', '1', p], check=True)
