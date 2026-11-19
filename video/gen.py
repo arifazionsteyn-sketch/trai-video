@@ -421,7 +421,7 @@ def tts_gemini_whole(lines, lang, path, avoid=()):
                 errs.append(f'{m}: HTTP {e.code} {e.read()[:160]!r}'.split('\\n')[0])
                 if e.code == 400 and not noinst: noinst = True; continue  # модель без системной инструкции — повтор без неё
                 if e.code in (400, 403, 404): break
-                time.sleep(min(60, 10 * (attempt + 1)))
+                time.sleep(min(90, 15 * (attempt + 1)) if e.code == 429 else min(60, 10 * (attempt + 1)))
             except Exception as e:
                 errs.append(f'{m}: {e}'); time.sleep(3)
     raise RuntimeError('Gemini TTS: ' + ' | '.join(errs[-4:]))
@@ -887,6 +887,7 @@ post — подпись для соцсетей на каждом языке (2�
 
 
 
+JARGON = ['поддержк', 'сопротивлен', 'доходност', 'мультипликатор', 'p/e', 'базисн', 'ликвидност', 'шорт', 'волатильност', 'ликвидац', 'дивергенц', 'перекупл', 'перепрод']
 CTA_SAY = {'ru': 'Напиши «{w}» в комментариях — пришлю разбор.', 'en': 'Comment “{w}” and I will send you the breakdown.', 'uz': 'Izohga «{w}» deb yozing — tahlilni yuboraman.'}
 # одно кодовое слово во всех роликах — без путаницы (на экране то же слово, что говорит диктор)
 CTA_WORD = {'ru': 'агент', 'en': 'agent', 'uz': 'agent'}
@@ -1000,6 +1001,18 @@ def make_script_story(facts):
         if n1 >= 6 and ok1 / n1 >= ok0 / max(1, n0) - 1e-9: sc = ed; model += f' → редактор {m2}'
         else: log(f'редактор потерял данные сцен ({ok1} из {len(ed.get("scenes") or [])} против {ok0}) — оставляю сценарий писателя')
     except Exception as e: log('редактор:', e)
+    for _ in range(2):  # жаргон профи — переписываем простыми словами
+        jh = sorted({w for x in sc['scenes'] for w in JARGON if w in ((x.get('ru') or {}).get('say', '') + ' ' + json.dumps(x.get('ru') or {}, ensure_ascii=False)).lower()})
+        if not jh: break
+        log('в сценарии жаргон:', jh, '— переписываю простыми словами')
+        msgj = ('Перепиши сценарий для обычного зрителя: убери профессиональные слова (' + ', '.join(jh) + ') на ВСЕХ языках — в say и в надписях. '
+                'Замени их простыми словами («уровень 60 тысяч долларов» вместо «поддержка», «проценты по облигациям США» вместо «доходность»). '
+                'Цифры, типы сцен и все поля сохрани; beats и keys — слова из нового say. Верни тот же JSON.\n\n' + json.dumps(sc, ensure_ascii=False))
+        try:
+            tj, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msgj}]}], 'generationConfig': {**gc, 'temperature': 0.3, 'responseSchema': SCHEMA2}}, timeout=240)
+            sj = merge_edit(sc, parse(tj))
+            if len(sj.get('scenes') or []) >= 6 and sum(map(has_data, sj['scenes'])) >= sum(map(has_data, sc['scenes'])) - 1: sc = sj
+        except Exception as e: log('переписать жаргон не вышло:', e); break
     bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
     for _ in range(2):
         hits = sorted({w for x in sc['scenes'] for L in LANGS_ALL for w in bad(json.dumps(x.get(L) or {}, ensure_ascii=False))})
@@ -1541,7 +1554,9 @@ def make_video(script, L, idx, stamp, mock=False):
             tok_scene = [(w, 0.3 + t_, i) for (w, i), t_ in zip(toks, tm)]
             speech = len(a) / SR
         except Exception as e:
-            log('голос Gemini не получился, беру Azure:', e); engine = 'azure'
+            # другой голос (Azure) не берём: ролик с чужим голосом хуже, чем пропущенный язык
+            if os.environ.get('VOICE_FALLBACK') == 'azure': log('голос Gemini не получился, беру Azure:', e); engine = 'azure'
+            else: raise RuntimeError(f'голос Gemini не получился ({str(e)[:160]}) — этот язык пропускаю, чужим голосом не озвучиваю')
     if voice is None:
         # по сценам: ElevenLabs или Azure дают время слов сами; между сценами паузы
         parts, wsl = [], []
