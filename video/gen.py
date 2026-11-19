@@ -379,11 +379,12 @@ def tighten(a, max_gap=0.16, tempo=1.0, work=None):
     return b
 
 
-def tts_gemini_whole(lines, lang, path):
+def tts_gemini_whole(lines, lang, path, avoid=()):
     import base64
     key = os.environ['GEMINI_SCRIPT_KEY']; voice = os.environ.get('GEMINI_VOICE_' + lang.upper()) or os.environ.get('GEMINI_VOICE') or VOICE_DEFAULT[lang]; errs = []
     text = '\n'.join(lines)
     first = MODEL_DEFAULT.get(lang); models = ([first] if first else []) + [x for x in TTS_MODELS if x != first]
+    models = [m for m in models if m not in avoid] or models
     for m in models:
         noinst = False
         # основную модель пробуем дольше (у запасных другой тембр — голос не должен «гулять» от ролика к ролику)
@@ -401,7 +402,7 @@ def tts_gemini_whole(lines, lang, path):
                 a = np.interp(np.arange(int(len(a) * SR / rate)) / SR, np.arange(len(a)) / rate, a)
                 with wave.open(path, 'wb') as w:
                     w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes((np.clip(a, -1, 1) * 32767).astype('<i2').tobytes())
-                log(f'голос Gemini {m} · {voice} · {len(a) / SR:.1f} с'); return
+                log(f'голос Gemini {m} · {voice} · {len(a) / SR:.1f} с'); tts_gemini_whole.last_model = m; return
             except urllib.error.HTTPError as e:
                 errs.append(f'{m}: HTTP {e.code} {e.read()[:160]!r}'.split('\\n')[0])
                 if e.code == 400 and not noinst: noinst = True; continue  # модель без системной инструкции — повтор без неё
@@ -823,6 +824,8 @@ RULES2 = '''Ты сценарист и режиссёр коротких вер�
 - без воды: каждая фраза либо новый факт, либо объяснение. Никаких «интересно, что», «стоит отметить», «на этом фоне», «ситуация остаётся напряжённой».
 - сцены разные по картинке: не больше двух headline, минимум 5 разных типов сцен.
 Подряд не ставь два одинаковых типа сцен. candles — 1–2 раза, chain — 1 раз.
+БЕЗ ЖАРГОНА: не используй термины профи — P/E, мультипликатор, поддержка, сопротивление, базисные пункты, доходность, ликвидность, шорт. Если без слова никак — объясни его простыми словами в той же фразе.
+ЧИСЛА СОГЛАСОВАНЫ: цены и уровни одного актива одного порядка (уровень 35 долларов при цене 360 — ошибка). Каждое число — из исследования.
 ДАННЫЕ СЦЕНЫ ОБЯЗАТЕЛЬНЫ: у counter есть value, у ring — pct, у versus — a_value и b_value с подписями, у bars — values и items, у chain/timeline — 2–4 items, у checklist — list.
 Если для сцены нет точных цифр из исследования — не ставь этот тип, возьми hook (крупный заголовок с картинкой) или headline. Пустая сцена — брак.
 
@@ -978,7 +981,8 @@ def make_script_story(facts):
                             'generationConfig': {**gc, 'temperature': 0.3, 'responseSchema': SCHEMA2}}, timeout=240)
         ed = merge_edit(sc, parse(t2))
         ok0, ok1 = sum(map(has_data, sc['scenes'])), sum(map(has_data, ed.get('scenes') or []))
-        if len(ed.get('scenes') or []) >= 5 and ok1 >= ok0: sc = ed; model += f' → редактор {m2}'
+        n0, n1 = len(sc['scenes']), len(ed.get('scenes') or [])
+        if n1 >= 6 and ok1 / n1 >= ok0 / max(1, n0) - 1e-9: sc = ed; model += f' → редактор {m2}'
         else: log(f'редактор потерял данные сцен ({ok1} из {len(ed.get("scenes") or [])} против {ok0}) — оставляю сценарий писателя')
     except Exception as e: log('редактор:', e)
     bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
@@ -1161,7 +1165,9 @@ bars — values и items; chain, timeline — items; checklist — list; headlin
 8. Узбекский — латиницей, современный и естественный; английский — естественный.
 9. РЕЧЬ: числа в say круглые и простые; дробей вроде «103,69» в речи нет — точное число остаётся на экране. Длинных перечислений через запятые нет.
 10. РАЗНООБРАЗИЕ: не больше двух headline, минимум 5 разных типов сцен, подряд нет двух одинаковых типов.
-11. ПОНЯТНОСТЬ: каждый термин объяснён простыми словами, есть сцена «что это значит для обычного человека». Весь русский текст 95–120 слов.''')
+11. ПОНЯТНОСТЬ: каждый термин объяснён простыми словами, есть сцена «что это значит для обычного человека». Весь русский текст 95–120 слов. Жаргона профи (P/E, мультипликатор, поддержка, сопротивление, базисные пункты, доходность) нет — замени простыми словами.
+12. ЧИСЛА СОГЛАСОВАНЫ: цены и уровни одного актива одного порядка (уровень 35 при цене 360 — ошибка: исправь по исследованию или убери). Все числа сцены совпадают с числами в say.
+13. ДАННЫЕ: не удаляй сцены и не стирай числа и пункты (value, pct, values, items, list) — только исправляй их.''')
 
 
 def make_script3(facts):
@@ -1488,8 +1494,15 @@ def make_video(script, L, idx, stamp, mock=False):
     voice = None
     if engine == 'gemini':
         try:
-            p = os.path.join(work, 'vo_all.wav'); tts_gemini_whole(says, L, p); a, off = trim(read_wav(p))
-            wr = lambda path, arr: (lambda w: (w.setnchannels(1), w.setsampwidth(2), w.setframerate(SR), w.writeframes((np.clip(arr, -1, 1) * 32767).astype('<i2').tobytes()), w.close()))(wave.open(path, 'wb'))
+            p = os.path.join(work, 'vo_all.wav'); wr = lambda path, arr: (lambda w: (w.setnchannels(1), w.setsampwidth(2), w.setframerate(SR), w.writeframes((np.clip(arr, -1, 1) * 32767).astype('<i2').tobytes()), w.close()))(wave.open(path, 'wb'))
+            # голос иногда обрывается на середине текста (модель прочитала половину) — сверяем число услышанных слов и переозвучиваем
+            nw, avoid = len([w for sy in says for w in words_of(sy)]), []
+            for att in range(3):
+                tts_gemini_whole(says, L, p, avoid); hw = len(whisper_words(p, L))
+                if hw >= nw * 0.82: break
+                log(f'озвучка неполная: услышано {hw} слов из {nw} — переозвучиваю'); avoid.append(getattr(tts_gemini_whole, 'last_model', ''))
+            else: raise RuntimeError(f'озвучка неполная: {hw} слов из {nw}')
+            a, off = trim(read_wav(p))
             if script.get('v') in (2, 3):  # без затяжных пауз на запятых и чуть бодрее (VOICE_TEMPO, по умолчанию ×1,1)
                 a = tighten(a, float(os.environ.get('VOICE_GAP') or 0.16), float(os.environ.get('VOICE_TEMPO') or 1.1), work)
             wr(p, a)
