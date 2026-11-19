@@ -12,6 +12,7 @@ on:
       count: { description: 'Сколько тем', default: '1' }
       langs: { description: 'Языки', default: 'ru,en,uz' }
       mode: { description: 'story — истории любого рынка, gold — старые темы про золото', default: 'story' }
+      length: { description: 'short — короткий ролик 15–20 с (одна мысль, один факт, призыв); пусто — полная история', default: '' }
       daily: { description: '1 — ежедневный выпуск (2 темы × 3 языка); ставит будильник Cloudflare в 07:20 по Ташкенту', default: '' }
   # Главный запуск — будильник Cloudflare (cloudflare/video-start.js): GitHub запускает своё расписание с опозданием на несколько часов.
   # Это расписание — запасное: если утром будильник уже собрал ролики, оно ничего не делает.
@@ -89,8 +90,9 @@ jobs:
           if [ -z "$LANGS" ]; then LANGS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('langs','ru,en,uz'))"); fi
           if [ -z "$MODE" ]; then MODE=$(python3 -c "import json;print(json.load(open('video/run.json')).get('mode','story'))"); fi
           FORMATS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('formats',''))")
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.daily }}" = "1" ]; then COUNT=2; LANGS=ru,en,uz; MODE=story; FORMATS=; fi
-          NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --mode "$MODE" --formats "$FORMATS"
+          LENGTH="${{ github.event.inputs.length }}"; if [ -z "$LENGTH" ] && [ "${{ github.event_name }}" = "push" ]; then LENGTH=$(python3 -c "import json;print(json.load(open('video/run.json')).get('length',''))"); fi
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.daily }}" = "1" ]; then COUNT=2; LANGS=ru,en,uz; MODE=story; FORMATS=; LENGTH=; fi
+          NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --mode "$MODE" --formats "$FORMATS" --length "$LENGTH"
       - name: Сохранить историю тем
         if: always()
         uses: actions/cache/save@v4

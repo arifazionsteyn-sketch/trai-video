@@ -951,8 +951,9 @@ STOP_WORDS = ['шпион', 'любовн', 'интим', 'арестова', '�
               'josus', 'ayg\'ov', 'hibsga', 'firibgar']
 
 
-def make_script_story(facts):
-    msg = RULES2 + '\n\nИССЛЕДОВАНИЕ:\n' + facts
+def make_script_story(facts, short=False):
+    msg = (RULES_SHORT if short else RULES2) + '\n\nИССЛЕДОВАНИЕ:\n' + facts
+    MIN, WMAX = (4, 55) if short else (5, 128)
     gc = {'temperature': 0.8, 'maxOutputTokens': 20000, 'responseMimeType': 'application/json'}
     def parse(t):
         j = json.loads(t.strip().removeprefix('```json').removeprefix('```').removesuffix('```'))
@@ -963,7 +964,7 @@ def make_script_story(facts):
     # Gemini иногда отдаёт урезанный сценарий (2–4 сцены) — пробуем ещё: снова со схемой, затем без схемы и с другой моделью
     sc, model, alt = None, '', [m for m in MODELS if m != MODELS[0]] + MODELS[:1]
     for att in range(4):
-        hint = '' if att == 0 else '\n\nВАЖНО: в массиве scenes должно быть 7–9 сцен по структуре выше — от hook до cta.'
+        hint = '' if att == 0 else ('\n\nВАЖНО: в массиве scenes ровно 4 сцены — hook, факт, что это значит, cta.' if short else '\n\nВАЖНО: в массиве scenes должно быть 7–9 сцен по структуре выше — от hook до cta.')
         try:
             if att in (0, 1):
                 txt, c, model = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg + hint}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
@@ -974,31 +975,32 @@ def make_script_story(facts):
         except Exception as e:
             log(f'сценарий, попытка {att + 1}: {e}'); time.sleep(15); continue
         n = len(got.get('scenes') or [])
-        if n >= 5: sc = got; break
+        if n >= MIN: sc = got; break
         log(f'сценарий короткий (попытка {att + 1}, {model}, сцен: {n}, {c.get("finishReason")}): {txt[:300]!r}')
         time.sleep(15)
     if not sc: raise RuntimeError('слишком короткий сценарий')
     for _ in range(2):  # длина: 40–50 секунд речи
         wl = [len((x.get('ru') or {}).get('say', '').split()) for x in sc['scenes']]
-        if sum(wl) <= 128 and max(wl) <= 24: break
+        if sum(wl) <= WMAX and max(wl) <= (16 if short else 24): break
         log(f'сценарий длинный ({sum(wl)} слов, самая длинная фраза {max(wl)}) — сокращаю')
-        msg2 = ('Сократи этот сценарий: каждая фраза say — 8–20 слов, весь русский текст 95–120 слов (английский и узбекский — так же коротко). '
+        msg2 = (('Сократи этот сценарий: ровно 4 сцены, каждая фраза say — 7–14 слов, весь русский текст 35–48 слов (английский и узбекский — так же коротко). ' if short else
+                 'Сократи этот сценарий: каждая фраза say — 8–20 слов, весь русский текст 95–120 слов (английский и узбекский — так же коротко). ') +
                 'Сохрани историю, цифры, интригу, типы сцен и все остальные поля; beats и keys должны остаться словами из нового say. Верни тот же JSON.\n\n' + json.dumps(sc, ensure_ascii=False))
         try:
             t2, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msg2}]}], 'generationConfig': {**gc, 'responseSchema': SCHEMA2}}, timeout=240)
             sc2 = parse(t2)
-            if len(sc2.get('scenes') or []) >= 5: sc = sc2
+            if len(sc2.get('scenes') or []) >= MIN: sc = sc2
         except Exception as e: log('сократить не вышло:', e); break
     # Стоп-слова: обвинения, слухи и личная жизнь людей (шпионаж, связи, аресты) — даже «предполагаемые». Такие сцены переписываем,
     # а если не вышло — тему бросаем (запасная тема возьмёт другую): аккаунту не нужны претензии за клевету.
     # редактор: сверяет факты с исследованием, убирает воду и слухи, проверяет цепочку, понятность и разнообразие сцен
     try:
-        t2, _, m2 = gemini({'contents': [{'role': 'user', 'parts': [{'text': EDITOR2 + '\n\nСЦЕНАРИЙ:\n' + json.dumps(sc, ensure_ascii=False) + '\n\nИССЛЕДОВАНИЕ:\n' + facts}]}],
+        t2, _, m2 = gemini({'contents': [{'role': 'user', 'parts': [{'text': (EDITOR_SHORT if short else EDITOR2) + '\n\nСЦЕНАРИЙ:\n' + json.dumps(sc, ensure_ascii=False) + '\n\nИССЛЕДОВАНИЕ:\n' + facts}]}],
                             'generationConfig': {**gc, 'temperature': 0.3, 'responseSchema': SCHEMA2}}, timeout=240)
         ed = merge_edit(sc, parse(t2))
         ok0, ok1 = sum(map(has_data, sc['scenes'])), sum(map(has_data, ed.get('scenes') or []))
         n0, n1 = len(sc['scenes']), len(ed.get('scenes') or [])
-        if n1 >= 6 and ok1 / n1 >= ok0 / max(1, n0) - 1e-9: sc = ed; model += f' → редактор {m2}'
+        if n1 >= MIN + (0 if short else 1) and ok1 / n1 >= ok0 / max(1, n0) - 1e-9: sc = ed; model += f' → редактор {m2}'
         else: log(f'редактор потерял данные сцен ({ok1} из {len(ed.get("scenes") or [])} против {ok0}) — оставляю сценарий писателя')
     except Exception as e: log('редактор:', e)
     for _ in range(2):  # жаргон профи — переписываем простыми словами
@@ -1011,7 +1013,7 @@ def make_script_story(facts):
         try:
             tj, _, _ = gemini({'contents': [{'role': 'user', 'parts': [{'text': msgj}]}], 'generationConfig': {**gc, 'temperature': 0.3, 'responseSchema': SCHEMA2}}, timeout=240)
             sj = merge_edit(sc, parse(tj))
-            if len(sj.get('scenes') or []) >= 6 and sum(map(has_data, sj['scenes'])) >= sum(map(has_data, sc['scenes'])) - 1: sc = sj
+            if len(sj.get('scenes') or []) >= MIN + (0 if short else 1) and sum(map(has_data, sj['scenes'])) >= sum(map(has_data, sc['scenes'])) - 1: sc = sj
         except Exception as e: log('переписать жаргон не вышло:', e); break
     bad = lambda t: [w for w in STOP_WORDS if w in t.lower()]
     for _ in range(2):
@@ -1196,6 +1198,26 @@ bars — values и items; chain, timeline — items; checklist — list; headlin
 11. ПОНЯТНОСТЬ: каждый термин объяснён простыми словами, есть сцена «что это значит для обычного человека». Весь русский текст 95–120 слов. Жаргона профи (P/E, мультипликатор, поддержка, сопротивление, базисные пункты, доходность) нет — замени простыми словами.
 12. ЧИСЛА СОГЛАСОВАНЫ: цены и уровни одного актива одного порядка (уровень 35 при цене 360 — ошибка: исправь по исследованию или убери). Все числа сцены совпадают с числами в say.
 13. ДАННЫЕ: не удаляй сцены и не стирай числа и пункты (value, pct, values, items, list) — только исправляй их.''')
+
+
+# ---------- Короткий формат (15–20 с): одна мысль, один факт, призыв ----------
+SHORT_STRUCT = """СТРУКТУРА КОРОТКОГО РОЛИКА (ровно 4 сцены, 12–16 секунд речи — диктор читает бодро):
+1. hook — самое сильное число или факт истории одной фразой (крупно, с картинкой под тему). Утверждение, без вступлений.
+2. Один факт с доказательством на экране — candles (настоящий график актива) или counter / versus с главным числом.
+3. Что это значит для обычного человека — одна простая мысль (counter, chain из 2 звеньев или hook).
+4. cta — призыв написать кодовое слово в комментариях.
+"""
+def _short(text, kind):
+    if kind == 'rules': a, b = text.index('СТРУКТУРА ('), text.index('Каждая сцена отвечает'); t = text[:a] + SHORT_STRUCT + text[b:]
+    else: t = text
+    for x, y in (('Весь текст: русский 95–120 слов, английский 90–115, узбекский 80–100.', 'Весь текст: русский 35–48 слов, английский 33–45, узбекский 28–40.'),
+                 ('1–2 коротких предложения, 8–20 слов.', 'одно предложение, 7–14 слов.'),
+                 ('обязательно одна сцена «что это значит для обычного человека»', 'сцена 3 — «что это значит для обычного человека»'),
+                 ('минимум 5 разных типов сцен', '4 сцены разных типов'), ('Весь русский текст 95–120 слов.', 'Весь русский текст 35–48 слов, ровно 4 сцены.'), ('95–120 слов', '35–48 слов'), ('6–16 слов', '7–14 слов'), ('6–12 слов', '6–10 слов')):
+        t = t.replace(x, y)
+    return t
+RULES_SHORT = _short(RULES2, 'rules')
+EDITOR_SHORT = _short(EDITOR2, 'editor')
 
 
 def make_script3(facts):
@@ -1595,7 +1617,7 @@ def make_video(script, L, idx, stamp, mock=False):
             for ph in phrases(ws): ph['key'] = next((j for j, (w, _) in enumerate(ph['w']) if norm(w) in keyset), -1); subs.append(ph)
         else: subs += chunks(ws, s[L].get('keys') or [])
     t = len(voice) / SR
-    outro = round(max(t + (0.7 if v3 else 0.5), 20.0 if v3 else 28.0), 3); total = round(outro + (2.3 if v2 else 2.0), 3)  # v2 — не короче 30 с
+    outro = round(max(t + (0.7 if v3 else 0.5), 12.0 if script.get('short') else 20.0 if v3 else 28.0), 3); total = round(outro + (2.3 if v2 else 2.0), 3)  # v2 — не короче 30 с
     for i, d in enumerate(scenes): d['end'] = scenes[i + 1]['start'] if i + 1 < len(scenes) else outro
     beats = [] if v2 else [c['w'][c['key']][1] for c in subs if c.get('key', -1) >= 0]
     if v3:  # без ника и полоски прогресса — так ролик лучше попадает в рекомендации
@@ -1668,6 +1690,7 @@ MOCK2 = {'v': 2, 'topic': 'Биткоин падает пятую неделю �
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument('--length', default=os.environ.get('VIDEO_LENGTH') or '', choices=['', 'full', 'short'])  # short — 15–20 с: одна мысль, один факт, призыв
     ap.add_argument('--count', type=int, default=1); ap.add_argument('--langs', default='ru,en,uz'); ap.add_argument('--formats', default='')
     ap.add_argument('--mode', default='story', choices=['story', 'gold'])  # story — истории любого рынка за неделю; gold — старые темы про золото
     ap.add_argument('--mock', action='store_true')
@@ -1683,7 +1706,7 @@ def main():
     n, done = -1, 0
     while done < a.count and n + 1 < a.count + spare:
         n += 1
-        fmt = 'story' if a.mode == 'story' else order[(start + n) % len(order)]
+        fmt = ('short' if a.length == 'short' else 'story') if a.mode == 'story' else order[(start + n) % len(order)]
         try:
             if a.mode == 'story':
                 if a.mock:
@@ -1698,7 +1721,8 @@ def main():
                     if True:
                         am = re.search(r'АКТИВ[^\n]*?\(([A-Z^][A-Z0-9.=^-]{0,9})\)', facts) or re.search(r'АКТИВ[^\n]*?\b([A-Z]{2,5}(?:-USD|=[FX])?)\b', facts); an = asset_notes(am.group(1)) if am else []
                         if an: facts += '\n\nЗАМЕТКИ ПО АКТИВУ (Finnhub, Marketaux):\n' + fmt_items(an); src = list(dict.fromkeys(src + [x['src'] for x in an if x['src']]))[:10]
-                    script, m2 = make_script3(facts) if a.style == 'v3' else make_script_story(facts)
+                    script, m2 = make_script3(facts) if a.style == 'v3' else make_script_story(facts, short=a.length == 'short')
+                    if a.length == 'short': script['short'] = True
                     models = f'{m1}, {m2}'
                     script['category'] = script.get('category') or cat
                     json.dump({'facts': facts, 'sources': src, 'script': script}, open(os.path.join(OUTDIR, f'script_{stamp}_{n}.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
