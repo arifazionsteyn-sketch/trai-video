@@ -2,6 +2,7 @@
 # Расписание: каждый день 2 истории × 3 языка. Разовый запуск: изменить video/run.json (count, langs, mode: story | gold) и сохранить (commit),
 # или кнопка «Run workflow».
 name: video
+run-name: ${{ (github.event_name == 'schedule' || github.event.inputs.daily == '1') && 'Ежедневные ролики' || format('Ролики ({0})', github.event_name) }}
 on:
   push:
     branches: [main]
@@ -11,11 +12,31 @@ on:
       count: { description: 'Сколько тем', default: '1' }
       langs: { description: 'Языки', default: 'ru,en,uz' }
       mode: { description: 'story — истории любого рынка, gold — старые темы про золото', default: 'story' }
+      daily: { description: '1 — ежедневный выпуск (2 темы × 3 языка); ставит будильник Cloudflare в 07:20 по Ташкенту', default: '' }
+  # Главный запуск — будильник Cloudflare (cloudflare/video-start.js): GitHub запускает своё расписание с опозданием на несколько часов.
+  # Это расписание — запасное: если утром будильник уже собрал ролики, оно ничего не делает.
   schedule:
-    - cron: '0 3 * * *'   # 08:00 Ташкент (GitHub иногда запускает с опозданием на 5–20 минут)
+    - cron: '0 3 * * *'
 concurrency: { group: video, cancel-in-progress: false }
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions: { actions: read }
+    outputs: { skip: '${{ steps.c.outputs.skip }}' }
+    steps:
+      - id: c
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          SKIP=0
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            N=$(gh run list -R "${{ github.repository }}" -w video -e workflow_dispatch --created ">=$(date -u +%F)" -L 20 --json displayTitle,conclusion,status \
+              --jq '[.[] | select(.displayTitle == "Ежедневные ролики" and (.conclusion == "success" or .status != "completed"))] | length')
+            if [ "${N:-0}" -gt 0 ]; then SKIP=1; echo "Сегодня ролики уже собрал будильник Cloudflare — запасное расписание пропускаю"; fi
+          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
   make:
+    needs: check
+    if: needs.check.outputs.skip != '1'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -68,7 +89,7 @@ jobs:
           if [ -z "$LANGS" ]; then LANGS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('langs','ru,en,uz'))"); fi
           if [ -z "$MODE" ]; then MODE=$(python3 -c "import json;print(json.load(open('video/run.json')).get('mode','story'))"); fi
           FORMATS=$(python3 -c "import json;print(json.load(open('video/run.json')).get('formats',''))")
-          if [ "${{ github.event_name }}" = "schedule" ]; then COUNT=2; LANGS=ru,en,uz; MODE=story; FORMATS=; fi
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.daily }}" = "1" ]; then COUNT=2; LANGS=ru,en,uz; MODE=story; FORMATS=; fi
           NODE_PATH=$PWD/video/node_modules python3 video/gen.py --count "$COUNT" --langs "$LANGS" --mode "$MODE" --formats "$FORMATS"
       - name: Сохранить историю тем
         if: always()
