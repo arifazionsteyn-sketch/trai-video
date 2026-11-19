@@ -97,12 +97,12 @@ function title(text, y, size, accent, al = 1, maxW = 940) {
   if (!text) return; const acc = new Set(String(accent || '').toLowerCase().split(/\s+/).filter(Boolean));
   const lines = String(text).toUpperCase().split('\n').slice(0, 2);
   x.save(); x.globalAlpha *= al; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
-  let s = size; for (const ln of lines) { for (; s > 48; s -= 4) { x.font = `300 ${s}px ID`; if (x.measureText(ln).width * 1.06 <= maxW) break; } }
+  let s = size; for (const ln of lines) { for (; s > 48; s -= 4) { x.font = `900 ${s}px ID`; if (x.measureText(ln).width * 1.04 <= maxW) break; } }
   lines.forEach((ln, li) => {
     const words = ln.split(' '); x.letterSpacing = '-1px';
-    const ws = words.map(w => { const hot = acc.has(w.toLowerCase().replace(/[^\p{L}\p{N}%$]/gu, '')) || acc.has(w.toLowerCase()); x.font = `${hot ? 700 : 300} ${s}px ID`; return { w, hot, wd: x.measureText(w).width }; });
+    const ws = words.map(w => { const hot = acc.has(w.toLowerCase().replace(/[^\p{L}\p{N}%$]/gu, '')) || acc.has(w.toLowerCase()); x.font = `900 ${s}px ID`; return { w, hot, wd: x.measureText(w).width }; });
     const sp = s * 0.26, tw = ws.reduce((q, o) => q + o.wd, 0) + sp * (ws.length - 1); let cx = W / 2 - tw / 2;
-    for (const o of ws) { x.font = `${o.hot ? 700 : 300} ${s}px ID`; x.fillStyle = o.hot ? GOLD : TXT; x.fillText(o.w, cx, y + li * s * 1.05); cx += o.wd + sp; }
+    for (const o of ws) { x.font = `900 ${s}px ID`; x.fillStyle = o.hot ? GOLD : TXT; x.fillText(o.w, cx, y + li * s * 1.05); cx += o.wd + sp; }
   });
   x.restore(); x.letterSpacing = '0px';
 }
@@ -119,24 +119,138 @@ function pill(px, py, text, col, al = 1, size = 30, fill = true) {
 // ================== СЦЕНЫ ==================
 const SC = {};
 
+// ---------- Иллюстрации под тему: рисуются в нижней половине сцены (база y0, масштаб k) ----------
+const ART = {};
+const poly = (pts, f) => { x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fillStyle = f; x.fill(); };
+function shadowAt(cx, y, w, al) { const sh = x.createRadialGradient(cx, y, 10, cx, y, w); sh.addColorStop(0, `rgba(0,0,0,${0.7 * al})`); sh.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = sh; x.fillRect(cx - w, y - 60, w * 2, 140); }
+function glowAt(cx, cy, r, rgb, al) { const g = x.createRadialGradient(cx, cy, 10, cx, cy, r); g.addColorStop(0, `rgba(${rgb},${al})`); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(cx - r, cy - r, r * 2, r * 2); }
+function ingot(cx, cy, s, shine, pal) {
+  const [c1, c2, c3, c4, c5] = pal || ['#E9C57A', '#A87C33', '#7E5A22', '#5E4318', GOLD_HI];
+  const w = 300 * s, d = 120 * s, h = 90 * s, tp = 40 * s;
+  const top = [[cx - w / 2 + tp, cy - h], [cx + w / 2 - tp, cy - h], [cx + w / 2 - tp + d * 0.6, cy - h - d * 0.45], [cx - w / 2 + tp + d * 0.6, cy - h - d * 0.45]];
+  const front = [[cx - w / 2, cy], [cx + w / 2, cy], [cx + w / 2 - tp, cy - h], [cx - w / 2 + tp, cy - h]];
+  const side = [[cx + w / 2, cy], [cx + w / 2 + d * 0.6, cy - d * 0.45], [cx + w / 2 - tp + d * 0.6, cy - h - d * 0.45], [cx + w / 2 - tp, cy - h]];
+  let g = x.createLinearGradient(cx, cy - h, cx, cy); g.addColorStop(0, c1); g.addColorStop(1, c2); poly(front, g);
+  g = x.createLinearGradient(cx + w / 2, cy, cx + w / 2 + d * 0.6, cy - h); g.addColorStop(0, c3); g.addColorStop(1, c4); poly(side, g);
+  g = x.createLinearGradient(cx - w / 2, cy - h - d * 0.45, cx + w / 2, cy - h); g.addColorStop(0, c5); g.addColorStop(1, c1); poly(top, g);
+  x.save(); x.beginPath(); front.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.clip();
+  const sx = cx - w + shine * w * 2.2, sg = x.createLinearGradient(sx - 60, 0, sx + 60, 0);
+  sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,250,230,0.55)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = sg; x.fillRect(cx - w, cy - h - 10, w * 2, h + 20); x.restore();
+  x.save(); x.globalAlpha *= 0.5; x.font = `900 ${34 * s}px ID`; x.fillStyle = c3; x.textAlign = 'center'; x.fillText('999.9', cx, cy - h * 0.38); x.restore();
+}
+// стопка слитков: падают по очереди, по ним проходит блик
+const stack = pal => (t, s, y0, k) => {
+  const a = s.start; x.save(); x.translate(W / 2, y0); x.scale(k, k); x.translate(-W / 2, -y0);
+  [[-170, 0], [170, 0], [0, -96], [-85, -192], [85, -192]].forEach(([dx, dy], i) => {
+    const p = eb(seg(t, a + 0.3 + i * 0.14, 0.5)); if (p <= 0) return;
+    x.save(); x.globalAlpha *= cl(p); ingot(W / 2 + dx - 30, y0 + dy - (1 - cl(p)) * 260, 0.95, seg(t, a + 1.4 + i * 0.08, 1.4), pal); x.restore();
+  });
+  shadowAt(W / 2, y0 + 30, 420, eo(seg(t, a + 0.3, 0.6)) * 0.7); x.restore();
+};
+ART.gold = stack();
+ART.silver = stack(['#E4E8EE', '#9AA3AF', '#6E7681', '#4F565F', '#FFFFFF']);
+// монета биткоина: влетает с поворотом, блик
+ART.btc = (t, s, y0, k) => {
+  const a = s.start, p = eb(seg(t, a + 0.2, 0.7)), spin = Math.cos((1 - cl(p)) * Math.PI * 2.5); if (p <= 0) return;
+  const cy = y0 - 170, R = 210 * k;
+  glowAt(W / 2, cy, 420 * k, '232,144,42', 0.18 * cl(p));
+  x.save(); x.translate(W / 2, cy + (1 - cl(p)) * 120); x.scale(Math.max(0.06, Math.abs(spin)) * cl(p, 0, 1.1), cl(p, 0, 1.1));
+  let g = x.createLinearGradient(-R, -R, R, R); g.addColorStop(0, '#FFD28A'); g.addColorStop(0.5, '#F2A23C'); g.addColorStop(1, '#A65B12');
+  x.fillStyle = '#7A4210'; x.beginPath(); x.arc(0, 14 * k, R, 0, 7); x.fill();
+  x.fillStyle = g; x.beginPath(); x.arc(0, 0, R, 0, 7); x.fill();
+  x.strokeStyle = 'rgba(255,240,210,0.55)'; x.lineWidth = 8 * k; x.beginPath(); x.arc(0, 0, R * 0.82, 0, 7); x.stroke();
+  x.font = `900 ${250 * k}px ID`; x.fillStyle = '#FFF6E6'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('₿', 0, 10 * k); x.textBaseline = 'alphabetic';
+  const sh = seg(t, a + 1.1, 1.2), sx = -R * 1.6 + sh * R * 3.2, sg = x.createLinearGradient(sx - 50, -R, sx + 50, R);
+  sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.45)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); x.save(); x.beginPath(); x.arc(0, 0, R, 0, 7); x.clip(); x.fillStyle = sg; x.fillRect(-R, -R, 2 * R, 2 * R); x.restore();
+  x.restore(); shadowAt(W / 2, y0 + 60, 300, cl(p) * 0.6);
+};
+// бочка нефти: появляется, капля срывается вниз
+ART.oil = (t, s, y0, k) => {
+  const a = s.start, p = eb(seg(t, a + 0.2, 0.6)); if (p <= 0) return;
+  const w = 300 * k, h = 400 * k, top = y0 - h + (1 - cl(p)) * 80, L = W / 2 - w / 2;
+  x.save(); x.globalAlpha *= cl(p); glowAt(W / 2, y0 - h / 2, 460 * k, '217,180,106', 0.10);
+  let g = x.createLinearGradient(L, 0, L + w, 0); g.addColorStop(0, '#15181D'); g.addColorStop(0.35, '#3A414B'); g.addColorStop(0.6, '#262B33'); g.addColorStop(1, '#0E1014');
+  x.fillStyle = g; rr(L, top, w, h, 26 * k); x.fill();
+  [0.18, 0.5, 0.82].forEach(f => { x.fillStyle = 'rgba(217,180,106,0.55)'; rr(L - 6 * k, top + h * f - 9 * k, w + 12 * k, 18 * k, 9 * k); x.fill(); });
+  x.fillStyle = '#4A525D'; x.beginPath(); x.ellipse(W / 2, top + 4, w / 2, 26 * k, 0, 0, 7); x.fill();
+  x.fillStyle = '#1A1E24'; x.beginPath(); x.ellipse(W / 2 + w * 0.22, top + 2, 22 * k, 9 * k, 0, 0, 7); x.fill();
+  x.font = `900 ${70 * k}px ID`; x.fillStyle = 'rgba(242,243,245,0.85)'; x.textAlign = 'center'; x.fillText('OIL', W / 2, top + h * 0.66);
+  // капля
+  const dp = seg(t, a + 1.0, 1.1); if (dp > 0 && dp < 1) { const dy = top + h + 10 + dp * dp * 180 * k, r = 18 * k; x.fillStyle = '#0B0C0F'; x.strokeStyle = 'rgba(217,180,106,0.8)'; x.lineWidth = 3; x.beginPath(); x.moveTo(W / 2 + w * 0.3, dy - r * 2); x.quadraticCurveTo(W / 2 + w * 0.3 + r, dy - r * 0.2, W / 2 + w * 0.3, dy + r * 0.6); x.quadraticCurveTo(W / 2 + w * 0.3 - r, dy - r * 0.2, W / 2 + w * 0.3, dy - r * 2); x.fill(); x.stroke(); }
+  x.restore(); shadowAt(W / 2, y0 + 20, 320, cl(p) * 0.6);
+};
+// пачки долларов: ложатся одна на другую
+ART.usd = (t, s, y0, k) => {
+  const a = s.start; x.save(); x.translate(W / 2, y0); x.scale(k, k); x.translate(-W / 2, -y0);
+  for (let i = 0; i < 6; i++) {
+    const p = eb(seg(t, a + 0.25 + i * 0.12, 0.45)); if (p <= 0) continue;
+    const bw = 520, bh = 64, cx = W / 2 + (i % 2 ? 14 : -10), cy = y0 - i * 58 - (1 - cl(p)) * 220;
+    x.save(); x.globalAlpha *= cl(p); x.translate(cx, cy); x.rotate((i % 2 ? 1 : -1) * 0.025);
+    let g = x.createLinearGradient(-bw / 2, 0, bw / 2, 0); g.addColorStop(0, '#2F6E4C'); g.addColorStop(0.5, '#4C9A6E'); g.addColorStop(1, '#255A3D');
+    x.fillStyle = g; rr(-bw / 2, -bh / 2, bw, bh, 8); x.fill(); x.strokeStyle = 'rgba(220,240,225,0.35)'; x.lineWidth = 3; rr(-bw / 2 + 10, -bh / 2 + 8, bw - 20, bh - 16, 6); x.stroke();
+    x.fillStyle = GOLD; rr(-36, -bh / 2, 72, bh, 4); x.fill();
+    x.font = '900 40px ID'; x.fillStyle = 'rgba(230,248,235,0.9)'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('$', -bw / 2 + 50, 2); x.fillText('$', bw / 2 - 50, 2); x.textBaseline = 'alphabetic';
+    x.restore();
+  }
+  shadowAt(W / 2, y0 + 40, 380, eo(seg(t, a + 0.25, 0.6)) * 0.7); x.restore();
+};
+// центробанк: здание с колоннами, над ним знак процента
+ART.fed = (t, s, y0, k) => {
+  const a = s.start; x.save(); x.translate(W / 2, y0); x.scale(k, k); x.translate(-W / 2, -y0);
+  const bw = 620, L = W / 2 - bw / 2, p0 = eo(seg(t, a + 0.2, 0.5));
+  x.globalAlpha *= p0; x.fillStyle = 'rgba(217,180,106,0.16)'; x.strokeStyle = GOLD; x.lineWidth = 6;
+  rr(L - 20, y0 - 40, bw + 40, 40, 6); x.fill(); x.stroke();
+  for (let i = 0; i < 5; i++) { const p = eo(seg(t, a + 0.35 + i * 0.08, 0.4)), h = 300 * p, cx = L + 50 + i * ((bw - 100) / 4); x.fillStyle = 'rgba(217,180,106,0.22)'; rr(cx - 26, y0 - 40 - h, 52, h, 6); x.fill(); x.stroke(); }
+  const pr = eb(seg(t, a + 0.8, 0.5)), ry = y0 - 340; if (pr > 0) { x.save(); x.globalAlpha *= cl(pr); x.fillStyle = 'rgba(217,180,106,0.2)'; x.beginPath(); x.moveTo(L - 40, ry); x.lineTo(W / 2, ry - 150 * cl(pr)); x.lineTo(L + bw + 40, ry); x.closePath(); x.fill(); x.stroke(); x.restore(); }
+  const pc = eb(seg(t, a + 1.1, 0.5)); if (pc > 0) { x.save(); x.translate(W / 2, ry - 52); x.scale(0.55, 0.55); const sc = cl(pc, 0, 1.15); x.scale(sc, sc); glowAt(0, 0, 200, '217,180,106', 0.25); x.font = '900 190px ID'; x.fillStyle = GOLD_HI; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('%', 0, 0); x.restore(); x.textBaseline = 'alphabetic'; }
+  x.restore();
+};
+// чип (технологии, ИИ)
+ART.chip = (t, s, y0, k) => {
+  const a = s.start, p = eb(seg(t, a + 0.2, 0.6)); if (p <= 0) return;
+  const cs = 300 * k, cy = y0 - 200 * k; x.save(); x.globalAlpha *= cl(p); x.translate(W / 2, cy); x.scale(cl(p, 0, 1.1), cl(p, 0, 1.1));
+  // дорожки разбегаются от чипа
+  const tr = eo(seg(t, a + 0.6, 1.0)); x.strokeStyle = 'rgba(217,180,106,0.6)'; x.lineWidth = 4;
+  for (let i = 0; i < 6; i++) for (const sg of [-1, 1]) { const o = -cs / 2 + 30 + i * (cs - 60) / 5; x.beginPath(); x.moveTo(sg * cs / 2, o); x.lineTo(sg * (cs / 2 + 140 * tr), o); x.lineTo(sg * (cs / 2 + 140 * tr + 40 * tr), o + (i % 2 ? 40 : -40) * tr); x.stroke(); }
+  glowAt(0, 0, cs * 1.3, '217,180,106', 0.2);
+  let g = x.createLinearGradient(-cs / 2, -cs / 2, cs / 2, cs / 2); g.addColorStop(0, '#2A2F37'); g.addColorStop(1, '#101317'); x.fillStyle = g; rr(-cs / 2, -cs / 2, cs, cs, 28); x.fill();
+  x.strokeStyle = GOLD; x.lineWidth = 5; x.stroke(); x.strokeStyle = 'rgba(217,180,106,0.35)'; rr(-cs / 2 + 34, -cs / 2 + 34, cs - 68, cs - 68, 16); x.stroke();
+  x.font = `900 ${110 * k}px ID`; x.fillStyle = GOLD_HI; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(s.chip || 'AI', 0, 6); x.textBaseline = 'alphabetic';
+  x.restore();
+};
+// свечи: красно-зелёный график растёт по направлению истории
+ART.candles = (t, s, y0, k) => {
+  const a = s.start, dir = s.dir === 'down' ? -1 : s.dir === 'up' ? 1 : 0, n = 16, pts = synth(dir || 0.3, n + 1, 11);
+  const lo = Math.min(...pts) - 2, hi = Math.max(...pts) + 2, X0 = 120, X1 = 960, top = y0 - 560 * k, bot = y0 + 40, yy = v => bot - (v - lo) / (hi - lo) * (bot - top);
+  const step = (X1 - X0) / n, bw = step * 0.62;
+  x.save(); x.strokeStyle = 'rgba(255,255,255,0.06)'; x.lineWidth = 2; for (let i = 0; i < 4; i++) { const yv = top + i * (bot - top) / 3; x.beginPath(); x.moveTo(X0 - 20, yv); x.lineTo(X1 + 20, yv); x.stroke(); }
+  for (let i = 0; i < n; i++) {
+    const p = eb(seg(t, a + 0.15 + i * 0.07, 0.35)); if (p <= 0) continue;
+    const o = pts[i], c = pts[i + 1], up = c >= o, h = Math.max(o, c) + 0.8 + ((i * 7) % 3) * 0.5, l = Math.min(o, c) - 0.8 - ((i * 5) % 3) * 0.4, cx = X0 + step * (i + 0.5), col = up ? UP : DOWN;
+    x.save(); x.globalAlpha *= cl(p); const mid = yy((o + c) / 2); x.translate(cx, mid); x.scale(1, cl(p, 0, 1.1)); x.translate(-cx, -mid);
+    x.strokeStyle = col; x.lineWidth = 5; x.beginPath(); x.moveTo(cx, yy(h)); x.lineTo(cx, yy(l)); x.stroke();
+    x.fillStyle = col; rr(cx - bw / 2, Math.min(yy(o), yy(c)), bw, Math.max(6, Math.abs(yy(o) - yy(c))), 4); x.fill(); x.restore();
+  }
+  const lp = eo(seg(t, a + 0.15 + n * 0.07, 0.3)); if (lp > 0 && dir) { const cx = X0 + step * (n - 0.5), cy = yy(pts[n]); x.globalAlpha *= lp; glowAt(cx, cy, 160, dir > 0 ? RGB.up : RGB.down, 0.35); }
+  x.restore();
+};
+
 // Крючок: заголовок тонкими буквами + огромное число, которое считается; за ним бледная линия цены
 SC.hook = (t, s) => {
   const v = vis(t, s); x.save(); x.globalAlpha = v.a; x.translate(0, v.dy);
   kicker(s.kicker, 330);
   title(s.title, 470, 112, s.accent, eo(seg(t, s.start + 0.05, 0.45)));
-  // фоновая линия
-  const pts = s.series && s.series.length > 4 ? s.series : synth(s.dir === 'down' ? -1 : s.dir === 'up' ? 1 : 0, 70, 7);
-  const pr = eo(seg(t, s.start + 0.15, Math.min(2.2, (s.end - s.start) * 0.7)));
-  line(pts, 80, 1000, 1000, 1360, pr, s.dir === 'down' ? RGB.down : s.dir === 'up' ? RGB.up : RGB.gold, 0.55, true);
+  // иллюстрация под тему ролика (слитки, монета, бочка, доллары, банк, чип, свечи)
+  ART[s.art] ? ART[s.art](t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1) : ART.candles(t, s, s.value != null ? 1250 : 1150, s.value != null ? 0.82 : 1);
   if (s.value != null) {
     const b1 = beatT(s, 0, 0.35), p = eo(seg(t, b1 - 0.15, 0.9)), pop = eb(seg(t, b1 - 0.15, 0.35));
     if (pop > 0) {
       const val = (s.from != null ? s.from + (s.value - s.from) * p : s.value * p);
       const txt = money(val, s.decimals || 0, s.prefix || '', s.suffix || '');
-      x.save(); x.translate(W / 2, 880); const k = 0.82 + 0.18 * pop; x.scale(k, k);
+      x.save(); x.translate(W / 2, 800); const k = 0.82 + 0.18 * pop; x.scale(k, k);
       const f = fit(txt, 900, 'ID', 230, 980, 80); x.font = `900 ${f}px ID`; x.letterSpacing = '-4px';
       x.fillStyle = s.value < 0 || s.dir === 'down' ? DOWN : s.dir === 'up' ? UP : TXT; x.textAlign = 'center'; x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 30; x.fillText(txt, 0, 0); x.restore(); x.letterSpacing = '0px';
-      if (s.label) { x.save(); x.globalAlpha *= eo(seg(t, b1 + 0.25, 0.4)); x.font = `500 ${fit(s.label, 500, 'IN', 40, 900)}px IN`; x.fillStyle = MUT; x.textAlign = 'center'; x.fillText(s.label, W / 2, 960); x.restore(); }
+      if (s.label) { x.save(); x.globalAlpha *= eo(seg(t, b1 + 0.25, 0.4)); x.font = `500 ${fit(s.label, 500, 'IN', 40, 900)}px IN`; x.fillStyle = MUT; x.textAlign = 'center'; x.fillText(s.label, W / 2, 880); x.restore(); }
     }
   }
   x.restore(); source(t, s);
@@ -485,15 +599,17 @@ function subs(t) {
     const s = S[si], st = s.w[0][1] - LEAD, nx = S[si + 1], lastW = s.w.at(-1)[1];
     const end = nx && nx.w[0][1] - lastW < 1.4 ? nx.w[0][1] - LEAD : lastW + 0.7;
     if (t < st || t >= end) continue;
-    x.textBaseline = 'middle'; x.font = '700 50px IN';
-    const sp = 14, maxW = 860, rows = [[]]; let w = 0;
-    s.w.forEach(([wd], i) => { x.font = `${i === s.key ? 800 : 700} 50px IN`; const ww = x.measureText(wd).width; if (w + ww > maxW && rows.at(-1).length) { rows.push([]); w = 0; } rows.at(-1).push({ wd, i, ww }); w += ww + sp; });
+    x.textBaseline = 'middle'; x.font = '800 62px IN';
+    const sp = 18, maxW = 940, rows = [[]]; let w = 0;
+    s.w.forEach(([wd], i) => { const ww = x.measureText(wd).width + (i === s.key ? 32 : 0); if (w + ww > maxW && rows.at(-1).length) { rows.push([]); w = 0; } rows.at(-1).push({ wd, i, ww }); w += ww + sp; });
     rows.forEach((r, ri) => {
-      const rw = r.reduce((q, o) => q + o.ww, 0) + sp * (r.length - 1); let cx = W / 2 - rw / 2; const cy = 1530 + ri * 66;
+      const rw = r.reduce((q, o) => q + o.ww, 0) + sp * (r.length - 1); let cx = W / 2 - rw / 2; const cy = 1540 + ri * 88;
       for (const o of r) {
-        const p = eo(seg(t, s.w[o.i][1] - LEAD, 0.14)); if (p <= 0) { cx += o.ww + sp; continue; }
-        x.save(); x.globalAlpha = cl(p * 1.4); x.translate(cx + o.ww / 2, cy + (1 - p) * 10);
-        x.font = `${o.i === s.key ? 800 : 700} 50px IN`; x.fillStyle = o.i === s.key ? GOLD : TXT; x.shadowColor = 'rgba(0,0,0,0.8)'; x.shadowBlur = 14; x.textAlign = 'center'; x.fillText(o.wd, 0, 2); x.restore();
+        const p = eb(seg(t, s.w[o.i][1] - LEAD, 0.12)); if (p <= 0) { cx += o.ww + sp; continue; }
+        x.save(); x.globalAlpha = cl(p * 1.6); x.translate(cx + o.ww / 2, cy + (1 - cl(p)) * 12); const sc = 0.9 + 0.1 * p; x.scale(sc, sc);
+        if (o.i === s.key) { x.fillStyle = GOLD; rr(-o.ww / 2, -42, o.ww, 84, 16); x.fill(); x.fillStyle = '#0B0C0F'; }
+        else { x.fillStyle = TXT; x.shadowColor = 'rgba(0,0,0,0.7)'; x.shadowBlur = 12; }
+        x.font = '800 62px IN'; x.textAlign = 'center'; x.fillText(o.wd, 0, 3); x.restore();
         cx += o.ww + sp;
       }
     });
