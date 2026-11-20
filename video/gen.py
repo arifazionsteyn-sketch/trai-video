@@ -394,14 +394,19 @@ def tail_cut(a, le):
 
 def tts_gemini_whole(lines, lang, path, avoid=()):
     import base64
-    key = os.environ['GEMINI_SCRIPT_KEY']; voice = os.environ.get('GEMINI_VOICE_' + lang.upper()) or os.environ.get('GEMINI_VOICE') or VOICE_DEFAULT[lang]; errs = []
+    # Ключи для озвучки: лимит бесплатного Gemini считается на проект Google — второй ключ (другой проект) даёт ещё один дневной лимит.
+    # Модель и голос те же, поэтому голос в ролике не меняется. Дневной лимит кончился — сразу следующий ключ, без ожидания.
+    keys = [k for k in [os.environ.get('GEMINI_TTS_KEY'), os.environ.get('GEMINI_SCRIPT_KEY'), os.environ.get('GEMINI_TTS_KEY2')] if k]
+    keys = list(dict.fromkeys(keys)); dead = getattr(tts_gemini_whole, 'dead', set()); tts_gemini_whole.dead = dead
+    voice = os.environ.get('GEMINI_VOICE_' + lang.upper()) or os.environ.get('GEMINI_VOICE') or VOICE_DEFAULT[lang]; errs = []
     text = '\n'.join(lines)
     first = os.environ.get('GEMINI_TTS_MODEL_' + lang.upper()) or MODEL_DEFAULT.get(lang)
     # один и тот же голос во всех роликах: другие модели звучат иначе, поэтому запасные — только если закреплённой модели нет
     models = [first] if first else TTS_MODELS[:1]
-    for m in models:
+    for m, ki in [(m, ki) for m in models for ki in range(len(keys))]:
+        key = keys[ki]
+        if (m, ki) in dead: continue
         noinst = False
-        # основную модель пробуем дольше (у запасных другой тембр — голос не должен «гулять» от ролика к ролику)
         for attempt in range(6):
             try:
                 body = {'contents': [{'role': 'user', 'parts': [{'text': text}]}],
@@ -418,9 +423,11 @@ def tts_gemini_whole(lines, lang, path, avoid=()):
                     w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes((np.clip(a, -1, 1) * 32767).astype('<i2').tobytes())
                 log(f'голос Gemini {m} · {voice} · {len(a) / SR:.1f} с'); tts_gemini_whole.last_model = m; return
             except urllib.error.HTTPError as e:
-                errs.append(f'{m}: HTTP {e.code} {e.read()[:160]!r}'.split('\\n')[0])
+                body_ = e.read()[:2000]; errs.append(f'{m} (ключ {ki + 1}): HTTP {e.code} {body_[:120]!r}'.split('\\n')[0])
                 if e.code == 400 and not noinst: noinst = True; continue  # модель без системной инструкции — повтор без неё
                 if e.code in (400, 403, 404): break
+                if e.code == 429 and b'PerDay' in body_:  # дневной лимит этого проекта кончился — ждать бесполезно, берём следующий ключ
+                    dead.add((m, ki)); log(f'озвучка: дневной лимит {m} на ключе {ki + 1} исчерпан' + (' — беру следующий ключ' if ki + 1 < len(keys) else '')); break
                 time.sleep(min(90, 15 * (attempt + 1)) if e.code == 429 else min(60, 10 * (attempt + 1)))
             except Exception as e:
                 errs.append(f'{m}: {e}'); time.sleep(3)
