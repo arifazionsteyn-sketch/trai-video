@@ -13,6 +13,8 @@ const OUT = path.resolve(process.argv[2] || 'promo_out'), DIR = __dirname, FPS =
 const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1.5, recW: 2.5, screenW: 2400 } : { w: 1080, h: 1920, scale: 2, rec: 2, recW: 3, screenW: 3200 };
 const WATCH_WAIT = +(process.env.PROMO_WATCH_WAIT || 720); // секунд ждём в «Наблюдателе» до записи — Heatmap и «Внутри свечи» успевают прорисоваться
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
+// Защита Vercel на dev (SSO): робот проходит по секрету «Protection Bypass for Automation» (GitHub Secrets → VERCEL_BYPASS)
+const BYPASS = (process.env.VERCEL_BYPASS || '').trim();
 const TX = {
   ru: { kick: 'TRAI · ИИ-аналитик золота', intro: ['Золото глазами<br>15 ИИ-агентов', ''], overview: ['План сделки', 'вход · стоп · тейк на графике'], agents: ['15 ИИ-агентов', 'спорят и выносят один вердикт'],
     chat: ['Чат с ИИ', 'спроси — ответит с уровнями'], flow: ['Поток ордеров', 'стаканы и крупные сделки бирж'], strange: ['Доктор Стрэндж', '50 000 сценариев цены'], gamma: ['Гамма 3D', 'где дилеры держат цену'], news: ['Карта событий', 'мировые новости и золото'],
@@ -48,7 +50,7 @@ const DEMO = {
 async function record(b) {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: VIEW.rec, locale: LANG === 'en' ? 'en-US' : 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.addInitScript(l => { try { localStorage.setItem('trai.lang', JSON.stringify(l)); localStorage.setItem('lang', l); localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.ck', '1'); } catch {} }, LANG); // без обучающего тура и плашки cookie
-  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
+  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key, ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}) } }) : rt.continue(); });
   const p = await ctx.newPage(); const cdp = await ctx.newCDPSession(p);
   await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(10000);
   // сигнал «покупка» с аккуратными уровнями от текущей цены и пример диалога в чате — на языке ролика

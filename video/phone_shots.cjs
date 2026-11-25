@@ -4,13 +4,15 @@ const { chromium, devices } = require('playwright'); const crypto = require('cry
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
 const LANG = process.env.PHONE_LANG || 'ru', OUT = path.resolve(process.argv[2] || 'phone');
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
+// Защита Vercel на dev (SSO): робот проходит по секрету «Protection Bypass for Automation» (GitHub Secrets → VERCEL_BYPASS)
+const BYPASS = (process.env.VERCEL_BYPASS || '').trim();
 const VIEWS = (process.env.PHONE_VIEWS || 'overview,market,news,tech,flow,strange,gamma,agents,watch,journal,accuracy,settings').split(',');
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const b = await chromium.launch({ executablePath: fs.existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined, args: ['--no-sandbox'] });
   const ctx = await b.newContext({ ...devices['iPhone 13'], deviceScaleFactor: 2, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.addInitScript(l => { try { localStorage.setItem('trai.lang', JSON.stringify(l)); localStorage.setItem('lang', l); localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.ck', '1'); } catch {} }, LANG);
-  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
+  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key, ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}) } }) : rt.continue(); });
   const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(14000);
   if (await p.evaluate(() => { const e = document.querySelector('#lUser'); return !!(e && e.offsetParent); })) throw new Error('робот не вошёл на сайт');

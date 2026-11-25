@@ -29,6 +29,7 @@ jobs:
           done
       - env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS }}
           DPR: ${{ inputs.dpr }}
         run: NODE_PATH=/tmp/pw/node_modules node video/look.cjs look_out "${{ inputs.views }}" "${{ inputs.size }}"
       - name: Кадры в ветку look-out

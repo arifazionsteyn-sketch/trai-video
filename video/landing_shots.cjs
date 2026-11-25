@@ -5,6 +5,8 @@ const { chromium } = require('playwright'); const crypto = require('crypto'); co
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
 const LANG = process.env.SHOTS_LANG || 'ru', WAIT = +(process.env.SHOTS_WAIT || 720), ONLY = (process.env.SHOTS_ONLY || '').split(',').filter(Boolean), want = n => !ONLY.length || ONLY.includes(n), OUT = path.resolve(process.argv[2] || 'shots');
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
+// Защита Vercel на dev (SSO): робот проходит по секрету «Protection Bypass for Automation» (GitHub Secrets → VERCEL_BYPASS)
+const BYPASS = (process.env.VERCEL_BYPASS || '').trim();
 const CLEAN = 'header.top,.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRing{display:none!important}';
 
 (async () => {
@@ -12,7 +14,7 @@ const CLEAN = 'header.top,.rail,.statusbar,.ag-pill,#runFab,.ck,#tourBox,#tourRi
   const b = await chromium.launch({ executablePath: fs.existsSync('/usr/bin/google-chrome') ? '/usr/bin/google-chrome' : undefined, args: ['--no-sandbox'] });
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
   await ctx.addInitScript(l => { try { localStorage.setItem('trai.lang', JSON.stringify(l)); localStorage.setItem('lang', l); localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.ck', '1'); } catch {} }, LANG);
-  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
+  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key, ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}) } }) : rt.continue(); });
   const p = await ctx.newPage();
   await p.goto(SITE + '/#overview', { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(12000);
   if (await p.evaluate(() => { const e = document.querySelector('#lUser'); return !!(e && e.offsetParent); })) throw new Error('робот не вошёл на сайт (видна форма входа)');

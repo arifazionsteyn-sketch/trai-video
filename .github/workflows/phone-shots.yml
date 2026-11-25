@@ -22,6 +22,7 @@ jobs:
       - name: Снимки
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS }}
         run: |
           PHONE_LANG=$(python3 -c "import json;print(json.load(open('video/phone.json')).get('lang','ru'))") \
           PHONE_VIEWS=$(python3 -c "import json;print(json.load(open('video/phone.json')).get('views','overview,market,news,tech,flow,strange,gamma,agents,watch,journal,accuracy,settings'))") \

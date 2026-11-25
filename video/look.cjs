@@ -2,12 +2,14 @@
 const { chromium } = require('playwright'); const crypto = require('crypto'); const fs = require('fs');
 const SITE = (process.env.SITE || 'https://trai-gold-git-dev-steyn1.vercel.app').replace(/\/$/, '');
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
+// Защита Vercel на dev (SSO): робот проходит по секрету «Protection Bypass for Automation» (GitHub Secrets → VERCEL_BYPASS)
+const BYPASS = (process.env.VERCEL_BYPASS || '').trim();
 const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.slice(2); const [w, h] = size.split('x').map(Number);
 (async () => {
   fs.mkdirSync(out, { recursive: true });
   const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const ctx = await b.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: +(process.env.DPR || 1), locale: 'ru-RU', timezoneId: 'Asia/Tashkent' });
-  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key } }) : rt.continue(); });
+  await ctx.route('**/*', rt => { const u = rt.request().url(); return u.startsWith(SITE) ? rt.continue({ headers: { ...rt.request().headers(), 'x-trai-view': key, ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}) } }) : rt.continue(); });
   await ctx.addInitScript(() => { try { localStorage.setItem('trai.tourDone', '1'); localStorage.setItem('trai.lang', '"ru"'); } catch {} });
   const p = await ctx.newPage(); const errs = []; let cur = ''; p.on('pageerror', e => errs.push(`[${cur}] ошибка: ${e.message}`));
   p.on('console', m => { if (m.type() === 'error') !/Failed to load resource/.test(m.text()) && errs.push(`[${cur}] консоль: ${m.text().slice(0, 300)}`); });
@@ -47,7 +49,7 @@ const [out = 'look_out', views = 'watch', size = '1920x1080'] = process.argv.sli
       continue;
     }
     if (v.startsWith('api:')) { // ответ сервера как есть (проверка источников)
-      const r = await ctx.request.get(SITE + '/api/data?part=' + v.slice(4), { headers: { 'x-trai-view': key }, timeout: 90000 });
+      const r = await ctx.request.get(SITE + '/api/data?part=' + v.slice(4), { headers: { 'x-trai-view': key, ...(BYPASS ? { 'x-vercel-protection-bypass': BYPASS } : {}) }, timeout: 90000 });
       fs.writeFileSync(`${out}/${v.slice(4)}.json`, await r.text()); console.log(v, r.status()); continue;
     }
     try { await p.goto(SITE + '/#' + v, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(16000);
