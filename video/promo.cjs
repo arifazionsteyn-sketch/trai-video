@@ -66,6 +66,7 @@ async function record(b) {
   console.log('пример сигнала', ok); await p.reload({ waitUntil: 'domcontentloaded' }); await p.waitForTimeout(10000);
   // вместо сайта — страница входа? Останавливаемся сразу, чтобы не отправить в Telegram ролик с формой входа
   const loginShown = () => p.evaluate(() => { const e = document.querySelector('#lUser'); return !!(e && e.offsetParent); }).catch(() => false);
+  if (!p.url().startsWith(SITE)) throw new Error('защита Vercel не пустила робота (открылась ' + p.url().slice(0, 70) + '): добавьте секрет VERCEL_BYPASS в GitHub Secrets — запись остановлена');
   if (!ok || await loginShown()) throw new Error('робот-просмотрщик не вошёл на сайт (видна форма входа) — запись остановлена');
   const peek = () => p.evaluate(() => document.querySelector('.rail')?.classList.add('peek')).catch(() => {});
   const shots = {};
