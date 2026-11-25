@@ -32,6 +32,7 @@ jobs:
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS }}
+          SITE: https://trai-agent.com   # боевой адрес открыт без защиты Vercel; после переноса dev в main дизайн там тот же
         run: |
           J=${{ matrix.job }}; if [ "$J" = hero ] || [ "$J" = story ]; then MODE=$J; L=en; else MODE=reel; L=$J; fi
           PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") PROMO_STEP=record PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
