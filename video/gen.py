@@ -72,7 +72,8 @@ def gold_price():
     return None
 
 
-SITE = (os.environ.get('SITE_API') or 'https://trai-gold-git-dev-steyn1.vercel.app').rstrip('/')
+# боевой сайт открыт без защиты Vercel (dev закрыт SSO с 25.11, робот туда не попадает); данные те же, код сайта после переноса одинаковый
+SITE = (os.environ.get('SITE_API') or 'https://trai-agent.com').rstrip('/')
 
 
 def site(part, q=''):
