@@ -106,6 +106,8 @@ jobs:
           done
       - name: В ветку promo-out
         run: |
+          # если роликов нет (запись остановилась) — прошлые ролики в ветке не затираем
+          if ! ls out/*.mp4 >/dev/null 2>&1; then echo 'роликов нет — ветку promo-out не трогаем'; exit 0; fi
           cd out && echo '{"git":{"deploymentEnabled":false}}' > vercel.json && git init -q -b promo-out && git add -A
           git -c user.name=trai-bot -c user.email=bot@trai-agent.com commit -qm "промо ${GITHUB_SHA::7}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" promo-out
