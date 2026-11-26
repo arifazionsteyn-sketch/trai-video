@@ -1,1 +1,1 @@
-{"try": 17, "theme": "dark", "note": "theme: dark | light; язык ролика — en (матрица в .github/workflows/promo.yml)"}
+{"try": 18, "theme": "dark", "reels": "", "heroes": "en,ru,uz", "story": false, "note": "theme: dark | light; reels — языки вертикальных 4K-роликов с подписями (через запятую, пусто — не собирать); heroes — языки горизонтальных роликов без слов для витрины (интерфейс сайта на языке ролика); story — true/false (вертикальный без надписей)"}

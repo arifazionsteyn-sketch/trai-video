@@ -1,4 +1,5 @@
-# Промо «ноутбук»: вертикальный 4K-ролик (60 к/с, с подписями; языки — поле langs в promo.json) и горизонтальный ролик без слов для витрины (интерфейс на английском).
+# Промо «ноутбук»: вертикальный 4K-ролик (60 к/с, с подписями) и горизонтальный ролик без слов для витрины — по одному на каждый язык интерфейса.
+# Что собирать — в video/promo.json: reels (языки вертикальных роликов), heroes (языки роликов для витрины), story (true/false).
 # Запуск: изменить video/promo.json в ветке dev или кнопка «Run workflow». Итог — в Telegram (видео) и ветка promo-out.
 # 1) rec — запись живых разделов сайта; 2) render — кадры рисуются кусками параллельно (4K на процессоре медленный); 3) join — склейка, звук, отправка.
 name: promo
@@ -14,13 +15,29 @@ permissions:
 env:
   CHUNKS: 12
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.p.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          c = json.load(open('video/promo.json'))
+          lst = lambda k, d: [x.strip() for x in str(c.get(k, d)).split(',') if x.strip()]
+          jobs = lst('reels', 'en') + ['hero_' + l for l in lst('heroes', 'en')] + (['story'] if c.get('story', True) else [])
+          print('jobs=' + json.dumps(jobs))
+          PY
   rec:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
-        job: [en, hero, story]
+        job: ${{ fromJson(needs.plan.outputs.jobs) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,7 +51,7 @@ jobs:
           VERCEL_BYPASS: ${{ secrets.VERCEL_BYPASS }}
           SITE: https://trai-agent.com   # боевой адрес открыт без защиты Vercel; после переноса dev в main дизайн там тот же
         run: |
-          J=${{ matrix.job }}; if [ "$J" = hero ] || [ "$J" = story ]; then MODE=$J; L=en; else MODE=reel; L=$J; fi
+          J=${{ matrix.job }}; case "$J" in hero_*) MODE=hero; L=${J#hero_};; story) MODE=story; L=en;; *) MODE=reel; L=$J;; esac
           PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") PROMO_STEP=record PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
       - uses: actions/upload-artifact@v4
         with:
@@ -42,13 +59,13 @@ jobs:
           path: promo_out/
           retention-days: 3
   render:
-    needs: rec
+    needs: [plan, rec]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        job: [en, hero, story]
+        job: ${{ fromJson(needs.plan.outputs.jobs) }}
         chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
@@ -64,7 +81,7 @@ jobs:
           path: promo_out/
       - name: Кадры куска
         run: |
-          J=${{ matrix.job }}; if [ "$J" = hero ] || [ "$J" = story ]; then MODE=$J; L=en; else MODE=reel; L=$J; fi
+          J=${{ matrix.job }}; case "$J" in hero_*) MODE=hero; L=${J#hero_};; story) MODE=story; L=en;; *) MODE=reel; L=$J;; esac
           N=$(python3 -c "import json;print(round(json.load(open('promo_out/$J/job.json'))['total']*60))")
           C=${{ matrix.chunk }}; FROM=$(( N * C / CHUNKS )); TO=$(( N * (C + 1) / CHUNKS ))
           PROMO_THEME=$(python3 -c "import json;print(json.load(open('video/promo.json')).get('theme','dark'))") FROM=$FROM TO=$TO PROMO_STEP=render PROMO_MODE=$MODE PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs promo_out/$J
@@ -88,8 +105,10 @@ jobs:
           mkdir -p out; SUF=$(python3 -c "import json;print('_white' if json.load(open('video/promo.json')).get('theme')=='light' else '')" 2>/dev/null || true)
           for d in seg/*/; do J=$(basename $d); ls $d*.mp4 >/dev/null 2>&1 || continue
             for f in $(ls $d*.mp4 | sort); do echo "file '$PWD/$f'"; done > list_$J.txt
-            if [ "$J" = hero ]; then ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -c copy -movflags +faststart out/trai_hero$SUF.mp4; cp $d/trai_hero.jpg out/ 2>/dev/null || true
-            else ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -f lavfi -i anullsrc=r=48000:cl=stereo -c:v copy -c:a aac -b:a 96k -shortest -movflags +faststart out/trai_promo_$J$SUF.mp4; fi
+            case "$J" in
+              hero_*) L=${J#hero_}; ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -c copy -movflags +faststart out/trai_hero_$L$SUF.mp4; cp $d/trai_hero.jpg out/trai_hero_$L.jpg 2>/dev/null || true ;;
+              *) ffmpeg -v error -y -f concat -safe 0 -i list_$J.txt -f lavfi -i anullsrc=r=48000:cl=stereo -c:v copy -c:a aac -b:a 96k -shortest -movflags +faststart out/trai_promo_$J$SUF.mp4 ;;
+            esac
             mkdir -p out/pv_$J && cp $d/pv_*.jpg out/pv_$J/ 2>/dev/null || true
           done; ls -la out
       - name: В Telegram
