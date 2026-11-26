@@ -10,7 +10,8 @@ const THEME = process.env.PROMO_THEME || 'dark';
 const LANG = process.env.PROMO_LANG || 'ru', MODE = process.env.PROMO_MODE || 'reel', HERO = MODE === 'hero', STORY = MODE === 'story';
 const OUT = path.resolve(process.argv[2] || 'promo_out'), DIR = __dirname, FPS = +(process.env.PROMO_FPS || 60);
 // rec — плотность записи сайта, recW — для «Наблюдателя» (в ролике наезд на каждый его блок, поэтому пишем плотнее)
-const VIEW = HERO ? { w: 1920, h: 1080, scale: 1, rec: 1.5, recW: 2.5, screenW: 2400 } : { w: 1080, h: 1920, scale: 2, rec: 2, recW: 3, screenW: 3200 };
+const HQ = process.env.PROMO_HQ === '1'; // hero в 4K (3840×2160): сайт пишем плотнее, экран ноутбука рисуем крупнее — мелкие цифры читаются
+const VIEW = HERO ? (HQ ? { w: 1920, h: 1080, scale: 2, rec: 2, recW: 3, screenW: 3200 } : { w: 1920, h: 1080, scale: 1, rec: 1.5, recW: 2.5, screenW: 2400 }) : { w: 1080, h: 1920, scale: 2, rec: 2, recW: 3, screenW: 3200 };
 const WATCH_WAIT = +(process.env.PROMO_WATCH_WAIT || 720); // секунд ждём в «Наблюдателе» до записи — Heatmap и «Внутри свечи» успевают прорисоваться
 const key = crypto.createHmac('sha256', process.env.TG_BOT_TOKEN || '').update('trai-view-v1').digest('hex');
 const TX = {
@@ -114,7 +115,7 @@ async function record(b) {
 const STEP = process.env.PROMO_STEP || 'all'; // record — только запись разделов (кадры + job.json); render — кадры FROM..TO в отдельный кусок; all — всё сразу
 // лёгкая резкость (unsharp): мелкие цифры на экране ноутбука после перспективы не «мылятся»
 const SHARP = ['-vf', 'unsharp=5:5:0.6:3:3:0'];
-const encArgs = () => HERO ? [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-maxrate', '9M', '-bufsize', '18M'] : [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-maxrate', '40M', '-bufsize', '80M', '-tune', 'film'];
+const encArgs = () => HERO && HQ ? [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '13', '-maxrate', '90M', '-bufsize', '180M'] : HERO ? [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-maxrate', '9M', '-bufsize', '18M'] : [...SHARP, '-c:v', 'libx264', '-preset', 'slow', '-crf', '16', '-maxrate', '40M', '-bufsize', '80M', '-tune', 'film'];
 
 async function doRecord(exe) {
   fs.mkdirSync(path.join(OUT, 'f'), { recursive: true });

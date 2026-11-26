@@ -1,0 +1,100 @@
+# Видео шапки витрины в 4K: ноутбук целиком (камера как в прежней версии), без слов, бесшовный повтор.
+# Три языка (ru / en / uz). Запуск: кнопка «Run workflow» или изменить video/hero.json.
+# 1) rec — запись живых разделов сайта; 2) render — кадры 4K рисуются кусками параллельно; 3) join — склейка и три размера для сайта:
+#    4k (3840×2160, 30 к/с), основной (1920×1080, 60 к/с), мобильный (1280×720, 30 к/с) + постер. Итог — ветка hero-out.
+name: hero
+on:
+  push:
+    branches: [main]
+    paths: ['video/hero.json']
+  workflow_dispatch:
+concurrency: { group: hero, cancel-in-progress: true }
+permissions:
+  contents: write
+env:
+  CHUNKS: 12
+jobs:
+  rec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [ru, en, uz]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1
+      - name: Запись разделов
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+        run: PROMO_HQ=1 PROMO_STEP=record PROMO_MODE=hero PROMO_LANG=${{ matrix.lang }} NODE_PATH=/tmp/pw/node_modules node video/promo.cjs hero_out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rec-${{ matrix.lang }}
+          path: hero_out/
+          retention-days: 3
+  render:
+    needs: rec
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        lang: [ru, en, uz]
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Инструменты
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i -s playwright@1
+      - uses: actions/download-artifact@v4
+        with:
+          name: rec-${{ matrix.lang }}
+          path: hero_out/
+      - name: Кадры куска
+        run: |
+          L=${{ matrix.lang }}
+          N=$(python3 -c "import json;print(round(json.load(open('hero_out/job.json'))['total']*60))")
+          C=${{ matrix.chunk }}; FROM=$(( N * C / CHUNKS )); TO=$(( N * (C + 1) / CHUNKS ))
+          PROMO_HQ=1 FROM=$FROM TO=$TO PROMO_STEP=render PROMO_MODE=hero PROMO_LANG=$L NODE_PATH=/tmp/pw/node_modules node video/promo.cjs hero_out
+          mkdir -p seg/$L && mv hero_out/seg/* seg/$L/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seg-${{ matrix.lang }}-${{ matrix.chunk }}
+          path: seg/
+          retention-days: 3
+  join:
+    needs: render
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+      - uses: actions/download-artifact@v4
+        with: { path: seg, pattern: seg-*, merge-multiple: true }
+      - name: Склейка и размеры для сайта
+        run: |
+          mkdir -p out m
+          for L in ru en uz; do d=seg/$L; ls $d/*.mp4 >/dev/null 2>&1 || continue
+            for f in $(ls $d/*.mp4 | sort); do echo "file '$PWD/$f'"; done > list_$L.txt
+            ffmpeg -v error -y -f concat -safe 0 -i list_$L.txt -c copy m/master_$L.mp4
+            M=m/master_$L.mp4
+            # 4K: для больших экранов и ретины — цифры и мелкий текст читаются
+            ffmpeg -v error -y -i $M -an -vf "fps=30" -c:v libx264 -preset slow -crf 20 -maxrate 14M -bufsize 28M -profile:v high -level 5.1 -pix_fmt yuv420p -movflags +faststart out/hero_${L}_4k.mp4
+            # основной: 1920×1080, 60 к/с
+            ffmpeg -v error -y -i $M -an -vf "scale=1920:1080:flags=lanczos,unsharp=3:3:0.25" -r 60 -c:v libx264 -preset slow -crf 21 -maxrate 8M -bufsize 16M -profile:v high -level 4.2 -pix_fmt yuv420p -movflags +faststart out/hero_${L}.mp4
+            # мобильный: 1280×720, 30 к/с
+            ffmpeg -v error -y -i $M -an -vf "scale=1280:720:flags=lanczos,unsharp=3:3:0.25,fps=30" -c:v libx264 -preset slow -crf 23 -maxrate 3500k -bufsize 7M -profile:v main -pix_fmt yuv420p -movflags +faststart out/hero_${L}_m.mp4
+            # постер: кадр с открытым ноутбуком
+            ffmpeg -v error -y -ss 5.5 -i $M -frames:v 1 -vf "scale=1920:-2:flags=lanczos" -q:v 3 out/hero_${L}.jpg
+          done; ls -la out
+      - name: В ветку hero-out
+        run: |
+          cd out && echo '{"git":{"deploymentEnabled":false}}' > vercel.json && git init -q -b hero-out && git add -A
+          git -c user.name=trai-bot -c user.email=bot@trai-agent.com commit -qm "hero 4K ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" hero-out
